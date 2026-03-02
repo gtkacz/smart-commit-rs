@@ -294,4 +294,129 @@ mod tests {
         assert_eq!(parsed.repos.len(), 1);
         assert_eq!(parsed.repos[0].cache_file, "a1b2c3d4e5f67890.toml");
     }
+
+    #[test]
+    fn test_cache_index_default() {
+        let index = CacheIndex::default();
+        assert!(index.repos.is_empty());
+    }
+
+    #[test]
+    fn test_repo_cache_default() {
+        let cache = RepoCache::default();
+        assert!(cache.repo_path.is_empty());
+        assert!(cache.commits.is_empty());
+    }
+
+    #[test]
+    fn test_cached_commit_clone() {
+        let commit = CachedCommit {
+            hash: "abc123".into(),
+            message_preview: "test commit".into(),
+        };
+        let cloned = commit.clone();
+        assert_eq!(commit.hash, cloned.hash);
+        assert_eq!(commit.message_preview, cloned.message_preview);
+    }
+
+    #[test]
+    fn test_cache_index_entry_clone() {
+        let entry = CacheIndexEntry {
+            repo_path: "/path/to/repo".into(),
+            cache_file: "hash.toml".into(),
+        };
+        let cloned = entry.clone();
+        assert_eq!(entry.repo_path, cloned.repo_path);
+        assert_eq!(entry.cache_file, cloned.cache_file);
+    }
+
+    #[test]
+    fn test_repo_cache_clone() {
+        let cache = RepoCache {
+            repo_path: "/repo".into(),
+            commits: vec![CachedCommit {
+                hash: "abc".into(),
+                message_preview: "msg".into(),
+            }],
+        };
+        let cloned = cache.clone();
+        assert_eq!(cache.repo_path, cloned.repo_path);
+        assert_eq!(cache.commits.len(), cloned.commits.len());
+    }
+
+    #[test]
+    fn test_cache_index_clone() {
+        let index = CacheIndex {
+            repos: vec![CacheIndexEntry {
+                repo_path: "/repo".into(),
+                cache_file: "file.toml".into(),
+            }],
+        };
+        let cloned = index.clone();
+        assert_eq!(index.repos.len(), cloned.repos.len());
+    }
+
+    #[test]
+    fn test_repo_path_hash_consistency() {
+        // Same path should always produce same hash
+        let path = "/some/long/path/to/repository";
+        let hash1 = repo_path_hash(path);
+        let hash2 = repo_path_hash(path);
+        let hash3 = repo_path_hash(path);
+        assert_eq!(hash1, hash2);
+        assert_eq!(hash2, hash3);
+    }
+
+    #[test]
+    fn test_repo_path_hash_format() {
+        let hash = repo_path_hash("/test/path");
+        // Should be 16 hex characters
+        assert_eq!(hash.len(), 16);
+        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_multiple_commits_serde() {
+        let cache = RepoCache {
+            repo_path: "/repo".into(),
+            commits: vec![
+                CachedCommit {
+                    hash: "aaa111".into(),
+                    message_preview: "first".into(),
+                },
+                CachedCommit {
+                    hash: "bbb222".into(),
+                    message_preview: "second".into(),
+                },
+                CachedCommit {
+                    hash: "ccc333".into(),
+                    message_preview: "third".into(),
+                },
+            ],
+        };
+        let toml_str = toml::to_string_pretty(&cache).unwrap();
+        let parsed: RepoCache = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.commits.len(), 3);
+        assert_eq!(parsed.commits[0].hash, "aaa111");
+        assert_eq!(parsed.commits[2].message_preview, "third");
+    }
+
+    #[test]
+    fn test_cache_index_multiple_repos() {
+        let index = CacheIndex {
+            repos: vec![
+                CacheIndexEntry {
+                    repo_path: "/repo1".into(),
+                    cache_file: "hash1.toml".into(),
+                },
+                CacheIndexEntry {
+                    repo_path: "/repo2".into(),
+                    cache_file: "hash2.toml".into(),
+                },
+            ],
+        };
+        let toml_str = toml::to_string_pretty(&index).unwrap();
+        let parsed: CacheIndex = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.repos.len(), 2);
+    }
 }

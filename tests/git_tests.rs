@@ -152,7 +152,7 @@ fn commit_is_merge_detects_merge_commits() {
     // We'll just checkout c1 and create a new branch to be sure
     git_ok(repo.path(), ["checkout", &c1]);
     git_ok(repo.path(), ["checkout", "-b", "main_branch"]);
-    let c3 = commit_file(repo.path(), "c.txt", "3", "c3");
+    let _c3 = commit_file(repo.path(), "c.txt", "3", "c3");
 
     // Merge feature into main_branch
     // We might need to configure user email/name which init_git_repo does.
@@ -284,4 +284,199 @@ diff --git a/src/lib.rs b/src/lib.rs
     // Should contain lib.rs but not the nested json file
     assert!(filtered.contains("src/lib.rs"));
     assert!(!filtered.contains("config.json"));
+}
+
+#[test]
+fn filter_diff_by_globs_invalid_pattern_ignored() {
+    let diff = "diff --git a/test.rs b/test.rs\n+code\n";
+    // Invalid glob pattern should be silently ignored
+    let patterns = vec!["[invalid".to_string(), "*.rs".to_string()];
+    let filtered = git::filter_diff_by_globs(diff, &patterns);
+    // Since *.rs matches, the diff should be filtered out
+    assert!(!filtered.contains("test.rs"));
+}
+
+#[test]
+fn filter_diff_by_globs_multiple_files_partial_match() {
+    let diff = r#"diff --git a/src/main.rs b/src/main.rs
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -1 +1,2 @@
++// main
+diff --git a/Cargo.lock b/Cargo.lock
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1 +1,2 @@
++lock content
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1 +1,2 @@
++// lib
+"#;
+
+    let patterns = vec!["*.lock".to_string()];
+    let filtered = git::filter_diff_by_globs(diff, &patterns);
+
+    // Should keep .rs files, exclude .lock
+    assert!(filtered.contains("main.rs"));
+    assert!(filtered.contains("lib.rs"));
+    assert!(!filtered.contains("Cargo.lock"));
+}
+
+#[test]
+#[serial]
+fn find_repo_root_in_subdirectory() {
+    let repo = common::init_git_repo();
+    let subdir = repo.path().join("src").join("nested");
+    std::fs::create_dir_all(&subdir).expect("create subdir");
+    let _cwd = DirGuard::enter(&subdir);
+
+    let root = git::find_repo_root().expect("find repo root");
+    assert_eq!(
+        std::path::Path::new(&root).canonicalize().unwrap(),
+        repo.path().canonicalize().unwrap()
+    );
+}
+
+#[test]
+#[serial]
+fn ensure_head_exists_on_empty_repo_fails() {
+    let repo = common::init_git_repo();
+    let _cwd = DirGuard::enter(repo.path());
+
+    // Empty repo has no HEAD
+    assert!(git::ensure_head_exists().is_err());
+}
+
+#[test]
+#[serial]
+fn ensure_commit_exists_invalid_ref() {
+    let repo = common::init_git_repo();
+    let _cwd = DirGuard::enter(repo.path());
+    commit_file(repo.path(), "a.txt", "content", "initial");
+
+    let result = git::ensure_commit_exists("nonexistent_ref_12345");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("not found"));
+}
+
+#[test]
+#[serial]
+fn get_commit_diff_invalid_commit() {
+    let repo = common::init_git_repo();
+    let _cwd = DirGuard::enter(repo.path());
+    commit_file(repo.path(), "a.txt", "content", "initial");
+
+    let result = git::get_commit_diff("nonexistent_commit");
+    assert!(result.is_err());
+}
+
+#[test]
+#[serial]
+fn get_range_diff_invalid_commits() {
+    let repo = common::init_git_repo();
+    let _cwd = DirGuard::enter(repo.path());
+    let c1 = commit_file(repo.path(), "a.txt", "content", "initial");
+
+    // One valid, one invalid
+    let result = git::get_range_diff(&c1, "nonexistent");
+    assert!(result.is_err());
+
+    // Both invalid
+    let result = git::get_range_diff("bad1", "bad2");
+    assert!(result.is_err());
+}
+
+#[test]
+#[serial]
+fn run_commit_with_extra_args() {
+    let repo = common::init_git_repo();
+    let _cwd = DirGuard::enter(repo.path());
+
+    write_file(&repo.path().join("test.txt"), "content");
+    git_ok(repo.path(), ["add", "test.txt"]);
+
+    // Use --no-gpg-sign or similar benign extra arg
+    let extra_args = vec!["--no-gpg-sign".to_string()];
+    git::run_commit("test commit", &extra_args, true).expect("commit with extra args");
+
+    let msg = git_stdout(repo.path(), ["log", "-1", "--pretty=%s"]);
+    assert_eq!(msg, "test commit");
+}
+
+#[test]
+#[serial]
+fn run_commit_fails_with_nothing_staged() {
+    let repo = common::init_git_repo();
+    let _cwd = DirGuard::enter(repo.path());
+
+    // Need at least one commit first
+    commit_file(repo.path(), "initial.txt", "content", "first");
+
+    // Now try to commit with nothing staged
+    let result = git::run_commit("empty commit", &[], true);
+    assert!(result.is_err());
+}
+
+#[test]
+#[serial]
+fn rewrite_merge_commit_fails() {
+    let repo = common::init_git_repo();
+    let _cwd = DirGuard::enter(repo.path());
+
+    // Create merge commit
+    let c1 = commit_file(repo.path(), "a.txt", "1", "c1");
+    git_ok(repo.path(), ["checkout", "-b", "feature"]);
+    commit_file(repo.path(), "b.txt", "2", "c2");
+    git_ok(repo.path(), ["checkout", &c1]);
+    git_ok(repo.path(), ["checkout", "-b", "main_branch"]);
+    commit_file(repo.path(), "c.txt", "3", "c3");
+    git_ok(
+        repo.path(),
+        ["merge", "--no-ff", "feature", "-m", "merge commit"],
+    );
+
+    let merge = git_stdout(repo.path(), ["rev-parse", "HEAD"]);
+
+    // Create another commit after merge
+    commit_file(repo.path(), "d.txt", "4", "d4");
+
+    // Try to rewrite the merge commit (now it's HEAD~1, not HEAD)
+    let result = git::rewrite_commit_message(&merge, "new merge message", true);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("merge"));
+}
+
+#[test]
+#[serial]
+fn get_commit_diff_empty_commit() {
+    let repo = common::init_git_repo();
+    let _cwd = DirGuard::enter(repo.path());
+
+    // Create initial commit
+    commit_file(repo.path(), "a.txt", "content", "initial");
+
+    // Try to create an empty commit (requires --allow-empty)
+    git_ok(repo.path(), ["commit", "--allow-empty", "-m", "empty"]);
+    let empty_commit = git_stdout(repo.path(), ["rev-parse", "HEAD"]);
+
+    // get_commit_diff should fail for empty commit
+    let result = git::get_commit_diff(&empty_commit);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("no diff"));
+}
+
+#[test]
+#[serial]
+fn get_range_diff_same_commit() {
+    let repo = common::init_git_repo();
+    let _cwd = DirGuard::enter(repo.path());
+
+    let c1 = commit_file(repo.path(), "a.txt", "content", "initial");
+
+    // Same commit should produce empty diff
+    let result = git::get_range_diff(&c1, &c1);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("No diff"));
 }

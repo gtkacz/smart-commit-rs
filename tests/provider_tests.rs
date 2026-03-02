@@ -2,10 +2,10 @@ mod common;
 
 use auto_commit_rs::config::AppConfig;
 use auto_commit_rs::provider;
-use mockito::{Matcher, Server};
 use crate::common::EnvGuard;
-use std::fs;
+use mockito::{Matcher, Server};
 use serial_test::serial;
+use std::fs;
 
 fn cfg_for(provider_name: &str, api_url: String) -> AppConfig {
     let mut cfg = AppConfig::default();
@@ -21,6 +21,34 @@ fn default_model_for_returns_known_and_unknown_defaults() {
     assert_eq!(provider::default_model_for("openai"), "gpt-4o-mini");
     assert_eq!(provider::default_model_for("groq"), "llama-3.3-70b-versatile");
     assert_eq!(provider::default_model_for("unknown"), "");
+}
+
+#[test]
+fn default_model_for_all_known_providers() {
+    assert_eq!(provider::default_model_for("gemini"), "gemini-2.0-flash");
+    assert_eq!(
+        provider::default_model_for("anthropic"),
+        "claude-sonnet-4-20250514"
+    );
+    assert_eq!(provider::default_model_for("grok"), "grok-3");
+    assert_eq!(provider::default_model_for("deepseek"), "deepseek-chat");
+    assert_eq!(
+        provider::default_model_for("openrouter"),
+        "openai/gpt-4o-mini"
+    );
+    assert_eq!(
+        provider::default_model_for("mistral"),
+        "mistral-small-latest"
+    );
+    assert_eq!(
+        provider::default_model_for("together"),
+        "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+    );
+    assert_eq!(
+        provider::default_model_for("fireworks"),
+        "accounts/fireworks/models/llama-v3p3-70b-instruct"
+    );
+    assert_eq!(provider::default_model_for("perplexity"), "sonar");
 }
 
 #[test]
@@ -196,4 +224,253 @@ order = [0]
     
     mock_primary.assert();
     mock_fallback.assert();
+}
+
+#[test]
+fn call_llm_deepseek_provider() {
+    let mut server = Server::new();
+    let mock = server
+        .mock("POST", "/deepseek")
+        .match_header("authorization", "Bearer test-key")
+        .with_status(200)
+        .with_body(r#"{"choices":[{"message":{"content":"deepseek response"}}]}"#)
+        .create();
+
+    let cfg = cfg_for("deepseek", format!("{}/deepseek", server.url()));
+    let msg = provider::call_llm(&cfg, "system", "diff").expect("llm call");
+    assert_eq!(msg, "deepseek response");
+    mock.assert();
+}
+
+#[test]
+fn call_llm_grok_provider() {
+    let mut server = Server::new();
+    let mock = server
+        .mock("POST", "/grok")
+        .match_header("authorization", "Bearer test-key")
+        .with_status(200)
+        .with_body(r#"{"choices":[{"message":{"content":"grok response"}}]}"#)
+        .create();
+
+    let cfg = cfg_for("grok", format!("{}/grok", server.url()));
+    let msg = provider::call_llm(&cfg, "system", "diff").expect("llm call");
+    assert_eq!(msg, "grok response");
+    mock.assert();
+}
+
+#[test]
+fn call_llm_openrouter_provider() {
+    let mut server = Server::new();
+    let mock = server
+        .mock("POST", "/openrouter")
+        .match_header("authorization", "Bearer test-key")
+        .with_status(200)
+        .with_body(r#"{"choices":[{"message":{"content":"openrouter response"}}]}"#)
+        .create();
+
+    let cfg = cfg_for("openrouter", format!("{}/openrouter", server.url()));
+    let msg = provider::call_llm(&cfg, "system", "diff").expect("llm call");
+    assert_eq!(msg, "openrouter response");
+    mock.assert();
+}
+
+#[test]
+fn call_llm_mistral_provider() {
+    let mut server = Server::new();
+    let mock = server
+        .mock("POST", "/mistral")
+        .match_header("authorization", "Bearer test-key")
+        .with_status(200)
+        .with_body(r#"{"choices":[{"message":{"content":"mistral response"}}]}"#)
+        .create();
+
+    let cfg = cfg_for("mistral", format!("{}/mistral", server.url()));
+    let msg = provider::call_llm(&cfg, "system", "diff").expect("llm call");
+    assert_eq!(msg, "mistral response");
+    mock.assert();
+}
+
+#[test]
+fn call_llm_together_provider() {
+    let mut server = Server::new();
+    let mock = server
+        .mock("POST", "/together")
+        .match_header("authorization", "Bearer test-key")
+        .with_status(200)
+        .with_body(r#"{"choices":[{"message":{"content":"together response"}}]}"#)
+        .create();
+
+    let cfg = cfg_for("together", format!("{}/together", server.url()));
+    let msg = provider::call_llm(&cfg, "system", "diff").expect("llm call");
+    assert_eq!(msg, "together response");
+    mock.assert();
+}
+
+#[test]
+fn call_llm_fireworks_provider() {
+    let mut server = Server::new();
+    let mock = server
+        .mock("POST", "/fireworks")
+        .match_header("authorization", "Bearer test-key")
+        .with_status(200)
+        .with_body(r#"{"choices":[{"message":{"content":"fireworks response"}}]}"#)
+        .create();
+
+    let cfg = cfg_for("fireworks", format!("{}/fireworks", server.url()));
+    let msg = provider::call_llm(&cfg, "system", "diff").expect("llm call");
+    assert_eq!(msg, "fireworks response");
+    mock.assert();
+}
+
+#[test]
+fn call_llm_perplexity_provider() {
+    let mut server = Server::new();
+    let mock = server
+        .mock("POST", "/perplexity")
+        .match_header("authorization", "Bearer test-key")
+        .with_status(200)
+        .with_body(r#"{"choices":[{"message":{"content":"perplexity response"}}]}"#)
+        .create();
+
+    let cfg = cfg_for("perplexity", format!("{}/perplexity", server.url()));
+    let msg = provider::call_llm(&cfg, "system", "diff").expect("llm call");
+    assert_eq!(msg, "perplexity response");
+    mock.assert();
+}
+
+#[test]
+fn call_llm_groq_provider() {
+    let mut server = Server::new();
+    let mock = server
+        .mock("POST", "/groq")
+        .match_header("authorization", "Bearer test-key")
+        .with_status(200)
+        .with_body(r#"{"choices":[{"message":{"content":"groq response"}}]}"#)
+        .create();
+
+    let cfg = cfg_for("groq", format!("{}/groq", server.url()));
+    let msg = provider::call_llm(&cfg, "system", "diff").expect("llm call");
+    assert_eq!(msg, "groq response");
+    mock.assert();
+}
+
+#[test]
+fn call_llm_with_custom_url_overrides_provider_default() {
+    let mut server = Server::new();
+    let mock = server
+        .mock("POST", "/custom-endpoint")
+        .with_status(200)
+        .with_body(r#"{"choices":[{"message":{"content":"custom endpoint response"}}]}"#)
+        .create();
+
+    let cfg = cfg_for("openai", format!("{}/custom-endpoint", server.url()));
+    let msg = provider::call_llm(&cfg, "system", "diff").expect("llm call");
+    assert_eq!(msg, "custom endpoint response");
+    mock.assert();
+}
+
+#[test]
+fn call_llm_empty_headers_for_provider_with_defaults() {
+    let mut server = Server::new();
+    let mock = server
+        .mock("POST", "/gemini")
+        .with_status(200)
+        .with_body(r#"{"candidates":[{"content":{"parts":[{"text":"gemini no headers"}]}}]}"#)
+        .create();
+
+    let cfg = cfg_for("gemini", format!("{}/gemini", server.url()));
+    let msg = provider::call_llm(&cfg, "system", "diff").expect("llm call");
+    assert_eq!(msg, "gemini no headers");
+    mock.assert();
+}
+
+#[test]
+#[serial]
+fn call_llm_fallback_disabled_returns_error() {
+    let mut server = Server::new();
+    let mock = server
+        .mock("POST", "/fail")
+        .with_status(500)
+        .with_body("internal error")
+        .create();
+
+    let mut cfg = cfg_for("custom", format!("{}/fail", server.url()));
+    cfg.fallback_enabled = false;
+
+    let result = provider::call_llm(&cfg, "system", "diff");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("HTTP 500"));
+    mock.assert();
+}
+
+#[test]
+#[serial]
+fn call_llm_fallback_empty_order_returns_error() {
+    let mut server = Server::new();
+    let mock = server
+        .mock("POST", "/fail")
+        .with_status(401)
+        .with_body("unauthorized")
+        .create();
+
+    let cfg_dir = tempfile::TempDir::new().expect("tempdir");
+    let _env = EnvGuard::set(&[(
+        "ACR_CONFIG_HOME",
+        cfg_dir.path().to_string_lossy().as_ref(),
+    )]);
+
+    // Create empty presets file
+    let cgen_dir = cfg_dir.path().join("cgen");
+    fs::create_dir_all(&cgen_dir).expect("create cgen dir");
+    fs::write(
+        cgen_dir.join("presets.toml"),
+        "next_id = 0\npresets = []\n[fallback]\nenabled = true\norder = []\n",
+    )
+    .expect("write presets");
+
+    let mut cfg = cfg_for("custom", format!("{}/fail", server.url()));
+    cfg.fallback_enabled = true;
+
+    let result = provider::call_llm(&cfg, "system", "diff");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("HTTP 401"));
+    mock.assert();
+}
+
+#[test]
+fn call_llm_invalid_json_response() {
+    let mut server = Server::new();
+    let mock = server
+        .mock("POST", "/invalid")
+        .with_status(200)
+        .with_body("not json at all")
+        .create();
+
+    let cfg = cfg_for("openai", format!("{}/invalid", server.url()));
+    let result = provider::call_llm(&cfg, "system", "diff");
+    assert!(result.is_err());
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("Failed to parse API response"));
+    mock.assert();
+}
+
+#[test]
+fn call_llm_with_multiple_custom_headers() {
+    let mut server = Server::new();
+    let mock = server
+        .mock("POST", "/headers")
+        .match_header("X-Custom-One", "value1")
+        .match_header("X-Custom-Two", "value2")
+        .with_status(200)
+        .with_body(r#"{"choices":[{"message":{"content":"headers ok"}}]}"#)
+        .create();
+
+    let mut cfg = cfg_for("custom", format!("{}/headers", server.url()));
+    cfg.api_headers = "X-Custom-One: value1, X-Custom-Two: value2".into();
+
+    let msg = provider::call_llm(&cfg, "system", "diff").expect("llm call");
+    assert_eq!(msg, "headers ok");
+    mock.assert();
 }

@@ -761,4 +761,161 @@ mod tests {
         assert_eq!(id2, 1);
         assert_eq!(file.next_id, 2);
     }
+
+    #[test]
+    fn test_preset_display_with_key() {
+        let preset = Preset {
+            id: 1,
+            name: "My Preset".into(),
+            fields: LlmPresetFields {
+                provider: "groq".into(),
+                model: "llama".into(),
+                api_key: "sk-test".into(),
+                api_url: String::new(),
+                api_headers: String::new(),
+            },
+        };
+        let display = preset_display(&preset);
+        assert!(display.contains("My Preset"));
+        assert!(display.contains("groq"));
+        assert!(display.contains("llama"));
+        assert!(display.contains("key set"));
+    }
+
+    #[test]
+    fn test_preset_display_no_key() {
+        let preset = Preset {
+            id: 1,
+            name: "Empty Key".into(),
+            fields: LlmPresetFields {
+                provider: "openai".into(),
+                model: "gpt-4".into(),
+                api_key: String::new(),
+                api_url: String::new(),
+                api_headers: String::new(),
+            },
+        };
+        let display = preset_display(&preset);
+        assert!(display.contains("no key"));
+    }
+
+    #[test]
+    fn test_dedup_key_extracts_correct_fields() {
+        let fields = LlmPresetFields {
+            provider: "groq".into(),
+            model: "llama".into(),
+            api_key: "key123".into(),
+            api_url: "https://api.example.com".into(),
+            api_headers: "X-Custom: value".into(),
+        };
+        let key = dedup_key(&fields);
+        assert_eq!(key.0, "groq");
+        assert_eq!(key.1, "llama");
+        assert_eq!(key.2, "key123");
+        assert_eq!(key.3, "https://api.example.com");
+    }
+
+    #[test]
+    fn test_fallback_config_serde() {
+        let config = FallbackConfig {
+            enabled: true,
+            order: vec![1, 2, 3],
+        };
+        let toml_str = toml::to_string(&config).unwrap();
+        let parsed: FallbackConfig = toml::from_str(&toml_str).unwrap();
+        assert!(parsed.enabled);
+        assert_eq!(parsed.order, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_presets_file_serde_full() {
+        let mut file = PresetsFile::default();
+        create_preset(&mut file, Some("Test".into()), sample_fields());
+        file.fallback.order.push(0);
+
+        let toml_str = toml::to_string_pretty(&file).unwrap();
+        let parsed: PresetsFile = toml::from_str(&toml_str).unwrap();
+
+        assert_eq!(parsed.presets.len(), 1);
+        assert_eq!(parsed.presets[0].name, "Test");
+        assert_eq!(parsed.fallback.order, vec![0]);
+    }
+
+    #[test]
+    fn test_duplicate_preset_preserves_fields() {
+        let mut file = PresetsFile::default();
+        let fields = LlmPresetFields {
+            provider: "anthropic".into(),
+            model: "claude".into(),
+            api_key: "sk-ant".into(),
+            api_url: "https://api.anthropic.com".into(),
+            api_headers: "x-api-key: test".into(),
+        };
+        let id = create_preset(&mut file, Some("Original".into()), fields);
+        let dup_id = duplicate_preset(&mut file, id).unwrap();
+
+        let dup = file.presets.iter().find(|p| p.id == dup_id).unwrap();
+        assert_eq!(dup.fields.provider, "anthropic");
+        assert_eq!(dup.fields.model, "claude");
+        assert_eq!(dup.fields.api_key, "sk-ant");
+    }
+
+    #[test]
+    fn test_rename_nonexistent_preset_does_nothing() {
+        let mut file = PresetsFile::default();
+        create_preset(&mut file, Some("Original".into()), sample_fields());
+        rename_preset(&mut file, 999, "New Name".into());
+        // Should not panic, original unchanged
+        assert_eq!(file.presets[0].name, "Original");
+    }
+
+    #[test]
+    fn test_export_presets_multiple() {
+        let mut file = PresetsFile::default();
+        let id1 = create_preset(&mut file, Some("First".into()), sample_fields());
+        let fields2 = LlmPresetFields {
+            provider: "openai".into(),
+            ..sample_fields()
+        };
+        let id2 = create_preset(&mut file, Some("Second".into()), fields2);
+
+        let exported = export_presets(&file, &[id1, id2], true).unwrap();
+        assert!(exported.contains("First"));
+        assert!(exported.contains("Second"));
+    }
+
+    #[test]
+    fn test_import_presets_multiple() {
+        let mut import_file = PresetsFile::default();
+        create_preset(&mut import_file, Some("Import1".into()), sample_fields());
+        let fields2 = LlmPresetFields {
+            provider: "openai".into(),
+            ..sample_fields()
+        };
+        create_preset(&mut import_file, Some("Import2".into()), fields2);
+
+        let import_data = toml::to_string_pretty(&import_file).unwrap();
+
+        let mut file = PresetsFile::default();
+        let count = import_presets(&mut file, &import_data).unwrap();
+
+        assert_eq!(count, 2);
+        assert_eq!(file.presets.len(), 2);
+    }
+
+    #[test]
+    fn test_delete_preset_nonexistent() {
+        let mut file = PresetsFile::default();
+        create_preset(&mut file, None, sample_fields());
+        delete_preset(&mut file, 999); // Non-existent ID
+        assert_eq!(file.presets.len(), 1); // Original still there
+    }
+
+    #[test]
+    fn test_llm_preset_fields_clone() {
+        let fields = sample_fields();
+        let cloned = fields.clone();
+        assert_eq!(fields.provider, cloned.provider);
+        assert_eq!(fields.model, cloned.model);
+    }
 }

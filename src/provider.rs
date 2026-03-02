@@ -380,3 +380,312 @@ fn extract_by_path(value: &Value, path: &str) -> Result<String> {
         .map(|s| s.to_string())
         .with_context(|| "Expected string value at path end".to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_headers_empty() {
+        assert!(parse_headers("").is_empty());
+        assert!(parse_headers("   ").is_empty());
+    }
+
+    #[test]
+    fn test_parse_headers_single() {
+        let headers = parse_headers("Authorization: Bearer abc123");
+        assert_eq!(headers.len(), 1);
+        assert_eq!(headers[0].0, "Authorization");
+        assert_eq!(headers[0].1, "Bearer abc123");
+    }
+
+    #[test]
+    fn test_parse_headers_multiple() {
+        let headers = parse_headers("X-Api-Key: key123, Content-Type: application/json");
+        assert_eq!(headers.len(), 2);
+        assert_eq!(headers[0].0, "X-Api-Key");
+        assert_eq!(headers[0].1, "key123");
+        assert_eq!(headers[1].0, "Content-Type");
+        assert_eq!(headers[1].1, "application/json");
+    }
+
+    #[test]
+    fn test_parse_headers_trims_whitespace() {
+        let headers = parse_headers("  Key  :  Value  ");
+        assert_eq!(headers.len(), 1);
+        assert_eq!(headers[0].0, "Key");
+        assert_eq!(headers[0].1, "Value");
+    }
+
+    #[test]
+    fn test_parse_headers_skips_invalid() {
+        let headers = parse_headers("Valid: Header, InvalidNoColon, Another: One");
+        assert_eq!(headers.len(), 2);
+        assert_eq!(headers[0].0, "Valid");
+        assert_eq!(headers[1].0, "Another");
+    }
+
+    #[test]
+    fn test_extract_by_path_simple() {
+        let json = serde_json::json!({"message": "hello"});
+        let result = extract_by_path(&json, "message").unwrap();
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn test_extract_by_path_nested() {
+        let json = serde_json::json!({"content": {"text": "nested"}});
+        let result = extract_by_path(&json, "content.text").unwrap();
+        assert_eq!(result, "nested");
+    }
+
+    #[test]
+    fn test_extract_by_path_array_index() {
+        let json = serde_json::json!({"items": ["first", "second"]});
+        let result = extract_by_path(&json, "items.0").unwrap();
+        assert_eq!(result, "first");
+    }
+
+    #[test]
+    fn test_extract_by_path_complex() {
+        let json = serde_json::json!({
+            "choices": [{"message": {"content": "generated"}}]
+        });
+        let result = extract_by_path(&json, "choices.0.message.content").unwrap();
+        assert_eq!(result, "generated");
+    }
+
+    #[test]
+    fn test_extract_by_path_gemini_format() {
+        let json = serde_json::json!({
+            "candidates": [{"content": {"parts": [{"text": "gemini response"}]}}]
+        });
+        let result = extract_by_path(&json, "candidates.0.content.parts.0.text").unwrap();
+        assert_eq!(result, "gemini response");
+    }
+
+    #[test]
+    fn test_extract_by_path_anthropic_format() {
+        let json = serde_json::json!({
+            "content": [{"text": "anthropic response"}]
+        });
+        let result = extract_by_path(&json, "content.0.text").unwrap();
+        assert_eq!(result, "anthropic response");
+    }
+
+    #[test]
+    fn test_extract_by_path_key_not_found() {
+        let json = serde_json::json!({"foo": "bar"});
+        let result = extract_by_path(&json, "missing");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not found"));
+    }
+
+    #[test]
+    fn test_extract_by_path_index_out_of_bounds() {
+        let json = serde_json::json!({"items": ["only"]});
+        let result = extract_by_path(&json, "items.5");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("out of bounds"));
+    }
+
+    #[test]
+    fn test_extract_by_path_not_string() {
+        let json = serde_json::json!({"number": 42});
+        let result = extract_by_path(&json, "number");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Expected string"));
+    }
+
+    #[test]
+    fn test_build_request_body_openai_compat() {
+        let body = build_request_body(
+            RequestFormat::OpenAiCompat,
+            "gpt-4o",
+            "system prompt",
+            "user diff",
+        );
+        assert_eq!(body["model"], "gpt-4o");
+        assert_eq!(body["messages"][0]["role"], "system");
+        assert_eq!(body["messages"][0]["content"], "system prompt");
+        assert_eq!(body["messages"][1]["role"], "user");
+        assert_eq!(body["messages"][1]["content"], "user diff");
+        assert_eq!(body["max_tokens"], 512);
+        assert_eq!(body["temperature"], 0);
+    }
+
+    #[test]
+    fn test_build_request_body_gemini() {
+        let body = build_request_body(
+            RequestFormat::Gemini,
+            "gemini-pro",
+            "system prompt",
+            "user diff",
+        );
+        assert_eq!(body["system_instruction"]["parts"][0]["text"], "system prompt");
+        assert_eq!(body["contents"][0]["role"], "user");
+        assert_eq!(body["contents"][0]["parts"][0]["text"], "user diff");
+        assert_eq!(body["generationConfig"]["temperature"], 0);
+    }
+
+    #[test]
+    fn test_build_request_body_anthropic() {
+        let body = build_request_body(
+            RequestFormat::Anthropic,
+            "claude-3-opus",
+            "system prompt",
+            "user diff",
+        );
+        assert_eq!(body["model"], "claude-3-opus");
+        assert_eq!(body["system"], "system prompt");
+        assert_eq!(body["messages"][0]["role"], "user");
+        assert_eq!(body["messages"][0]["content"], "user diff");
+        assert_eq!(body["max_tokens"], 512);
+    }
+
+    #[test]
+    fn test_get_provider_known() {
+        assert!(get_provider("gemini").is_some());
+        assert!(get_provider("openai").is_some());
+        assert!(get_provider("anthropic").is_some());
+        assert!(get_provider("groq").is_some());
+        assert!(get_provider("grok").is_some());
+        assert!(get_provider("deepseek").is_some());
+        assert!(get_provider("openrouter").is_some());
+        assert!(get_provider("mistral").is_some());
+        assert!(get_provider("together").is_some());
+        assert!(get_provider("fireworks").is_some());
+        assert!(get_provider("perplexity").is_some());
+    }
+
+    #[test]
+    fn test_get_provider_unknown() {
+        assert!(get_provider("unknown").is_none());
+        assert!(get_provider("custom").is_none());
+    }
+
+    #[test]
+    fn test_get_provider_gemini_format() {
+        let provider = get_provider("gemini").unwrap();
+        assert_eq!(provider.format, RequestFormat::Gemini);
+        assert!(provider.api_url.contains("generativelanguage.googleapis.com"));
+        assert_eq!(provider.default_model, "gemini-2.0-flash");
+    }
+
+    #[test]
+    fn test_get_provider_anthropic_format() {
+        let provider = get_provider("anthropic").unwrap();
+        assert_eq!(provider.format, RequestFormat::Anthropic);
+        assert!(provider.api_url.contains("anthropic.com"));
+        assert!(provider.api_headers.contains("anthropic-version"));
+    }
+
+    #[test]
+    fn test_get_provider_openai_compat() {
+        for name in &["openai", "groq", "grok", "deepseek", "openrouter", "mistral", "together", "fireworks", "perplexity"] {
+            let provider = get_provider(name).unwrap();
+            assert_eq!(provider.format, RequestFormat::OpenAiCompat, "Provider {name} should use OpenAiCompat format");
+        }
+    }
+
+    #[test]
+    fn test_default_model_for_known() {
+        assert_eq!(default_model_for("groq"), "llama-3.3-70b-versatile");
+        assert_eq!(default_model_for("openai"), "gpt-4o-mini");
+        assert_eq!(default_model_for("anthropic"), "claude-sonnet-4-20250514");
+    }
+
+    #[test]
+    fn test_default_model_for_unknown() {
+        assert_eq!(default_model_for("custom"), "");
+        assert_eq!(default_model_for("unknown"), "");
+    }
+
+    #[test]
+    fn test_resolve_provider_known() {
+        let cfg = AppConfig {
+            provider: "groq".into(),
+            api_key: "test-key".into(),
+            ..Default::default()
+        };
+        let (url, headers, format, path) = resolve_provider(&cfg).unwrap();
+        assert!(url.contains("groq.com"));
+        assert!(headers.contains("Bearer"));
+        assert_eq!(format, RequestFormat::OpenAiCompat);
+        assert_eq!(path, "choices.0.message.content");
+    }
+
+    #[test]
+    fn test_resolve_provider_known_with_override() {
+        let cfg = AppConfig {
+            provider: "groq".into(),
+            api_url: "https://custom.url/v1".into(),
+            api_headers: "X-Custom: value".into(),
+            ..Default::default()
+        };
+        let (url, headers, _, _) = resolve_provider(&cfg).unwrap();
+        assert_eq!(url, "https://custom.url/v1");
+        assert_eq!(headers, "X-Custom: value");
+    }
+
+    #[test]
+    fn test_resolve_provider_custom_requires_url() {
+        let cfg = AppConfig {
+            provider: "custom-provider".into(),
+            api_url: "".into(),
+            ..Default::default()
+        };
+        let result = resolve_provider(&cfg);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Unknown provider"));
+    }
+
+    #[test]
+    fn test_resolve_provider_custom_with_url() {
+        let cfg = AppConfig {
+            provider: "custom-provider".into(),
+            api_url: "https://my-custom-api.com/v1".into(),
+            api_headers: "Authorization: custom".into(),
+            ..Default::default()
+        };
+        let (url, headers, format, path) = resolve_provider(&cfg).unwrap();
+        assert_eq!(url, "https://my-custom-api.com/v1");
+        assert_eq!(headers, "Authorization: custom");
+        assert_eq!(format, RequestFormat::OpenAiCompat);
+        assert_eq!(path, "choices.0.message.content");
+    }
+
+    #[test]
+    fn test_llm_call_error_display_http() {
+        let err = LlmCallError::HttpError {
+            code: 401,
+            body: "Unauthorized".into(),
+        };
+        let display = format!("{err}");
+        assert!(display.contains("HTTP 401"));
+        assert!(display.contains("Unauthorized"));
+    }
+
+    #[test]
+    fn test_llm_call_error_display_transport() {
+        let err = LlmCallError::TransportError("connection refused".into());
+        let display = format!("{err}");
+        assert!(display.contains("Network error"));
+        assert!(display.contains("connection refused"));
+    }
+
+    #[test]
+    fn test_llm_call_error_display_other() {
+        let err = LlmCallError::Other(anyhow::anyhow!("custom error"));
+        let display = format!("{err}");
+        assert!(display.contains("custom error"));
+    }
+
+    #[test]
+    fn test_request_format_equality() {
+        assert_eq!(RequestFormat::Gemini, RequestFormat::Gemini);
+        assert_eq!(RequestFormat::OpenAiCompat, RequestFormat::OpenAiCompat);
+        assert_eq!(RequestFormat::Anthropic, RequestFormat::Anthropic);
+        assert_ne!(RequestFormat::Gemini, RequestFormat::OpenAiCompat);
+    }
+}

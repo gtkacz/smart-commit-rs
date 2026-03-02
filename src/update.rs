@@ -145,3 +145,127 @@ pub fn print_update_warning(latest: &str) {
 pub fn current_version() -> &'static str {
     CURRENT_VERSION
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_github_repo_constant() {
+        assert_eq!(GITHUB_REPO, "gtkacz/smart-commit-rs");
+    }
+
+    #[test]
+    fn test_current_version_not_empty() {
+        assert!(!CURRENT_VERSION.is_empty());
+    }
+
+    #[test]
+    fn test_current_version_is_semver() {
+        let version = current_version();
+        assert!(parse_semver(version).is_some());
+    }
+
+    #[test]
+    fn test_parse_semver_basic() {
+        let v = parse_semver("1.2.3").unwrap();
+        assert_eq!(v, (1, 2, 3));
+    }
+
+    #[test]
+    fn test_parse_semver_with_v() {
+        let v = parse_semver("v1.2.3").unwrap();
+        assert_eq!(v, (1, 2, 3));
+    }
+
+    #[test]
+    fn test_parse_semver_invalid_parts() {
+        assert!(parse_semver("1.2").is_none());
+        assert!(parse_semver("1").is_none());
+        assert!(parse_semver("").is_none());
+        assert!(parse_semver("1.2.3.4").is_none());
+    }
+
+    #[test]
+    fn test_parse_semver_non_numeric() {
+        assert!(parse_semver("a.b.c").is_none());
+        assert!(parse_semver("1.2.x").is_none());
+    }
+
+    #[test]
+    fn test_parse_semver_large_numbers() {
+        let v = parse_semver("100.200.300").unwrap();
+        assert_eq!(v, (100, 200, 300));
+    }
+
+    #[test]
+    fn test_parse_semver_zeros() {
+        let v = parse_semver("0.0.0").unwrap();
+        assert_eq!(v, (0, 0, 0));
+    }
+
+    #[test]
+    fn test_version_check_struct() {
+        let check = VersionCheck {
+            latest: "2.0.0".into(),
+            current: "1.0.0".into(),
+            update_available: true,
+        };
+        assert_eq!(check.latest, "2.0.0");
+        assert_eq!(check.current, "1.0.0");
+        assert!(check.update_available);
+    }
+
+    #[test]
+    fn test_version_comparison_logic() {
+        // Simulate the comparison logic used in check_version
+        let latest = "2.0.0";
+        let current = "1.5.0";
+        let update_available = match (parse_semver(latest), parse_semver(current)) {
+            (Some(latest_v), Some(current_v)) => latest_v > current_v,
+            _ => false,
+        };
+        assert!(update_available);
+    }
+
+    #[test]
+    fn test_version_comparison_no_update() {
+        let latest = "1.0.0";
+        let current = "1.5.0";
+        let update_available = match (parse_semver(latest), parse_semver(current)) {
+            (Some(latest_v), Some(current_v)) => latest_v > current_v,
+            _ => false,
+        };
+        assert!(!update_available);
+    }
+
+    #[test]
+    fn test_version_comparison_same() {
+        let latest = "1.5.0";
+        let current = "1.5.0";
+        let update_available = match (parse_semver(latest), parse_semver(current)) {
+            (Some(latest_v), Some(current_v)) => latest_v > current_v,
+            _ => false,
+        };
+        assert!(!update_available);
+    }
+
+    #[test]
+    fn test_version_comparison_invalid() {
+        let latest = "invalid";
+        let current = "1.0.0";
+        let update_available = match (parse_semver(latest), parse_semver(current)) {
+            (Some(latest_v), Some(current_v)) => latest_v > current_v,
+            _ => false,
+        };
+        assert!(!update_available); // Falls back to false for invalid
+    }
+
+    #[test]
+    fn test_print_update_warning_no_panic() {
+        // Just ensure it doesn't panic
+        print_update_warning("2.0.0");
+        print_update_warning("v1.5.0");
+        print_update_warning("");
+    }
+}

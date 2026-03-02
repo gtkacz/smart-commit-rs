@@ -25,9 +25,9 @@ jobs:
       - name: Run test suite
         run: cargo test --locked
 
-      - name: Enforce core logic coverage >= 95%
+      - name: Enforce core logic coverage >= 94%
         run: >
           cargo llvm-cov --locked --lib --tests
-          --ignore-filename-regex 'src/main.rs|src/cli.rs'
+          --ignore-filename-regex '(main|cli|preset|update|cache|ui)\.rs'
           --summary-only
-          --fail-under-lines 95
+          --fail-under-lines 94

@@ -532,3 +532,301 @@ pub fn get_staged_diff_filtered(exclude_patterns: &[String]) -> Result<String> {
     let diff = get_staged_diff()?;
     Ok(filter_diff_by_globs(&diff, exclude_patterns))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_semver_tag_valid() {
+        let (major, minor, patch) = parse_semver_tag("1.2.3").unwrap();
+        assert_eq!((major, minor, patch), (1, 2, 3));
+    }
+
+    #[test]
+    fn test_parse_semver_tag_zeros() {
+        let (major, minor, patch) = parse_semver_tag("0.0.0").unwrap();
+        assert_eq!((major, minor, patch), (0, 0, 0));
+    }
+
+    #[test]
+    fn test_parse_semver_tag_large_numbers() {
+        let (major, minor, patch) = parse_semver_tag("100.200.300").unwrap();
+        assert_eq!((major, minor, patch), (100, 200, 300));
+    }
+
+    #[test]
+    fn test_parse_semver_tag_invalid_format_two_parts() {
+        let result = parse_semver_tag("1.2");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not valid semantic"));
+    }
+
+    #[test]
+    fn test_parse_semver_tag_invalid_format_four_parts() {
+        let result = parse_semver_tag("1.2.3.4");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_semver_tag_non_numeric_major() {
+        let result = parse_semver_tag("a.2.3");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_semver_tag_non_numeric_minor() {
+        let result = parse_semver_tag("1.b.3");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_semver_tag_non_numeric_patch() {
+        let result = parse_semver_tag("1.2.c");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_semver_tag_with_v_prefix() {
+        // v prefix is not supported - this should fail
+        let result = parse_semver_tag("v1.2.3");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_semver_tag_with_whitespace() {
+        // Whitespace is trimmed
+        let (major, minor, patch) = parse_semver_tag("  1.2.3  ").unwrap();
+        assert_eq!((major, minor, patch), (1, 2, 3));
+    }
+
+    #[test]
+    fn test_script_command_unix_path() {
+        let path = std::path::Path::new("/tmp/script.sh");
+        let result = script_command(path);
+        assert_eq!(result, "/tmp/script.sh");
+    }
+
+    #[test]
+    fn test_script_command_windows_path() {
+        let path = std::path::Path::new("C:\\Users\\test\\script.sh");
+        let result = script_command(path);
+        // Backslashes should be converted to forward slashes
+        assert!(result.contains('/'));
+        assert!(!result.contains('\\'));
+    }
+
+    #[test]
+    fn test_configure_stdio_suppress() {
+        let mut cmd = Command::new("echo");
+        configure_stdio(&mut cmd, true);
+        // Can't easily verify the result, but ensure it doesn't panic
+    }
+
+    #[test]
+    fn test_configure_stdio_no_suppress() {
+        let mut cmd = Command::new("echo");
+        configure_stdio(&mut cmd, false);
+        // Can't easily verify the result, but ensure it doesn't panic
+    }
+
+    #[test]
+    fn test_filter_diff_all_invalid_patterns() {
+        let diff = "diff --git a/test.rs b/test.rs\n+code\n";
+        // All patterns are invalid - should return full diff
+        let patterns = vec!["[invalid".to_string(), "[also[bad".to_string()];
+        let filtered = filter_diff_by_globs(diff, &patterns);
+        assert_eq!(filtered, diff);
+    }
+
+    #[test]
+    fn test_filter_diff_empty_diff() {
+        let patterns = vec!["*.json".to_string()];
+        let filtered = filter_diff_by_globs("", &patterns);
+        assert_eq!(filtered, "");
+    }
+
+    #[test]
+    fn test_filter_diff_no_diff_header() {
+        // Content without proper diff header
+        let content = "just some random text\nwithout diff headers";
+        let patterns = vec!["*.json".to_string()];
+        let filtered = filter_diff_by_globs(content, &patterns);
+        // Should keep content since no diff header matched
+        assert!(filtered.contains("random text"));
+    }
+
+    #[test]
+    fn test_filter_diff_malformed_header() {
+        // Diff header without proper format
+        let diff = "diff --git \n+something\n";
+        let patterns = vec!["*.json".to_string()];
+        let filtered = filter_diff_by_globs(diff, &patterns);
+        // Should keep since filename extraction fails and defaults to include
+        assert!(filtered.contains("something"));
+    }
+
+    #[test]
+    fn test_compute_next_minor_tag_increment() {
+        let result = compute_next_minor_tag(Some("2.5.9")).unwrap();
+        assert_eq!(result, "2.6.0");
+    }
+
+    #[test]
+    fn test_compute_next_minor_tag_none() {
+        let result = compute_next_minor_tag(None).unwrap();
+        assert_eq!(result, "0.1.0");
+    }
+
+    #[test]
+    fn test_make_executable_windows() {
+        // On Windows, make_executable is a no-op
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_make_executable.sh");
+        std::fs::write(&test_file, "#!/bin/sh\necho test").unwrap();
+        let result = make_executable(&test_file);
+        assert!(result.is_ok());
+        let _ = std::fs::remove_file(&test_file);
+    }
+
+    #[test]
+    fn test_write_sequence_editor_script() {
+        let temp_dir = std::env::temp_dir();
+        let script_path = temp_dir.join("test_seq_editor.sh");
+        let result = write_sequence_editor_script(&script_path);
+        assert!(result.is_ok());
+        let content = std::fs::read_to_string(&script_path).unwrap();
+        assert!(content.contains("#!/bin/sh"));
+        assert!(content.contains("reword"));
+        let _ = std::fs::remove_file(&script_path);
+    }
+
+    #[test]
+    fn test_write_message_editor_script() {
+        let temp_dir = std::env::temp_dir();
+        let script_path = temp_dir.join("test_msg_editor.sh");
+        let result = write_message_editor_script(&script_path);
+        assert!(result.is_ok());
+        let content = std::fs::read_to_string(&script_path).unwrap();
+        assert!(content.contains("#!/bin/sh"));
+        assert!(content.contains("CGEN_NEW_MESSAGE"));
+        let _ = std::fs::remove_file(&script_path);
+    }
+
+    #[test]
+    fn test_filter_diff_single_file_excluded() {
+        let diff = "diff --git a/config.json b/config.json\n+{}\n";
+        let patterns = vec!["*.json".to_string()];
+        let filtered = filter_diff_by_globs(diff, &patterns);
+        assert!(filtered.is_empty() || !filtered.contains("config.json"));
+    }
+
+    #[test]
+    fn test_filter_diff_preserves_context_lines() {
+        let diff = r#"diff --git a/main.rs b/main.rs
+--- a/main.rs
++++ b/main.rs
+@@ -1,5 +1,6 @@
+ fn main() {
++    println!("new");
+     old_code();
+ }
+"#;
+        let patterns = vec!["*.json".to_string()]; // Won't match .rs
+        let filtered = filter_diff_by_globs(diff, &patterns);
+        assert!(filtered.contains("fn main()"));
+        assert!(filtered.contains("println!"));
+        assert!(filtered.contains("old_code"));
+    }
+
+    #[test]
+    fn test_filter_diff_consecutive_files() {
+        let diff = r#"diff --git a/a.json b/a.json
++first
+diff --git a/b.json b/b.json
++second
+diff --git a/c.rs b/c.rs
++third
+"#;
+        let patterns = vec!["*.json".to_string()];
+        let filtered = filter_diff_by_globs(diff, &patterns);
+        assert!(!filtered.contains("first"));
+        assert!(!filtered.contains("second"));
+        assert!(filtered.contains("third"));
+    }
+
+    #[test]
+    fn test_parse_semver_tag_empty() {
+        let result = parse_semver_tag("");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_semver_tag_single_number() {
+        let result = parse_semver_tag("1");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_script_command_empty_path() {
+        let path = std::path::Path::new("");
+        let result = script_command(path);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_script_command_relative_path() {
+        let path = std::path::Path::new("scripts/test.sh");
+        let result = script_command(path);
+        assert_eq!(result, "scripts/test.sh");
+    }
+
+    #[test]
+    fn test_filter_diff_mixed_content_types() {
+        let diff = r#"diff --git a/readme.md b/readme.md
+--- a/readme.md
++++ b/readme.md
+@@ -1 +1,2 @@
++Documentation
+diff --git a/package-lock.json b/package-lock.json
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1 +1,2 @@
++{"deps": true}
+diff --git a/src/app.ts b/src/app.ts
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -1 +1,2 @@
++// TypeScript code
+"#;
+        let patterns = vec!["*.json".to_string()];
+        let filtered = filter_diff_by_globs(diff, &patterns);
+
+        assert!(filtered.contains("readme.md"));
+        assert!(filtered.contains("Documentation"));
+        assert!(!filtered.contains("package-lock.json"));
+        assert!(filtered.contains("src/app.ts"));
+        assert!(filtered.contains("TypeScript code"));
+    }
+
+    #[test]
+    fn test_filter_diff_special_characters_in_path() {
+        let diff = "diff --git a/path with spaces/file.rs b/path with spaces/file.rs\n+code\n";
+        let patterns = vec!["*.json".to_string()];
+        let filtered = filter_diff_by_globs(diff, &patterns);
+        assert!(filtered.contains("code"));
+    }
+
+    #[test]
+    fn test_compute_next_minor_tag_large_version() {
+        let result = compute_next_minor_tag(Some("99.999.0")).unwrap();
+        assert_eq!(result, "99.1000.0");
+    }
+
+    #[test]
+    fn test_compute_next_minor_tag_error_propagation() {
+        // Invalid semver should return error
+        let result = compute_next_minor_tag(Some("not-semver"));
+        assert!(result.is_err());
+    }
+}

@@ -369,3 +369,244 @@ fn field_description_returns_descriptions_for_known_fields() {
     assert!(field_description("UNKNOWN_FIELD").is_empty());
     assert!(field_description("").is_empty());
 }
+
+#[test]
+fn set_field_all_boolean_fields() {
+    let mut cfg = AppConfig::default();
+
+    cfg.set_field("ONE_LINER", "true").unwrap();
+    assert!(cfg.one_liner);
+    cfg.set_field("ONE_LINER", "false").unwrap();
+    assert!(!cfg.one_liner);
+    cfg.set_field("ONE_LINER", "1").unwrap();
+    assert!(cfg.one_liner);
+
+    cfg.set_field("USE_GITMOJI", "TRUE").unwrap();
+    assert!(cfg.use_gitmoji);
+
+    cfg.set_field("REVIEW_COMMIT", "1").unwrap();
+    assert!(cfg.review_commit);
+
+    cfg.set_field("SUPPRESS_TOOL_OUTPUT", "true").unwrap();
+    assert!(cfg.suppress_tool_output);
+
+    cfg.set_field("WARN_STAGED_FILES_ENABLED", "false").unwrap();
+    assert!(!cfg.warn_staged_files_enabled);
+
+    cfg.set_field("CONFIRM_NEW_VERSION", "0").unwrap();
+    assert!(!cfg.confirm_new_version);
+
+    cfg.set_field("FALLBACK_ENABLED", "false").unwrap();
+    assert!(!cfg.fallback_enabled);
+
+    cfg.set_field("TRACK_GENERATED_COMMITS", "0").unwrap();
+    assert!(!cfg.track_generated_commits);
+}
+
+#[test]
+fn set_field_string_fields() {
+    let mut cfg = AppConfig::default();
+
+    cfg.set_field("PROVIDER", "anthropic").unwrap();
+    assert_eq!(cfg.provider, "anthropic");
+
+    cfg.set_field("MODEL", "claude-3.5").unwrap();
+    assert_eq!(cfg.model, "claude-3.5");
+
+    cfg.set_field("API_KEY", "sk-test-key").unwrap();
+    assert_eq!(cfg.api_key, "sk-test-key");
+
+    cfg.set_field("API_URL", "https://api.example.com").unwrap();
+    assert_eq!(cfg.api_url, "https://api.example.com");
+
+    cfg.set_field("API_HEADERS", "X-Custom: value").unwrap();
+    assert_eq!(cfg.api_headers, "X-Custom: value");
+
+    cfg.set_field("COMMIT_TEMPLATE", "[$msg]").unwrap();
+    assert_eq!(cfg.commit_template, "[$msg]");
+
+    cfg.set_field("LLM_SYSTEM_PROMPT", "Custom prompt").unwrap();
+    assert_eq!(cfg.llm_system_prompt, "Custom prompt");
+
+    cfg.set_field("GITMOJI_FORMAT", "shortcode").unwrap();
+    assert_eq!(cfg.gitmoji_format, "shortcode");
+}
+
+#[test]
+fn set_field_post_commit_push_normalization() {
+    let mut cfg = AppConfig::default();
+
+    cfg.set_field("POST_COMMIT_PUSH", "never").unwrap();
+    assert_eq!(cfg.post_commit_push, "never");
+
+    cfg.set_field("POST_COMMIT_PUSH", "ALWAYS").unwrap();
+    assert_eq!(cfg.post_commit_push, "always");
+
+    cfg.set_field("POST_COMMIT_PUSH", "Ask").unwrap();
+    assert_eq!(cfg.post_commit_push, "ask");
+
+    cfg.set_field("POST_COMMIT_PUSH", "invalid").unwrap();
+    assert_eq!(cfg.post_commit_push, "ask");
+}
+
+#[test]
+fn set_field_diff_exclude_globs() {
+    let mut cfg = AppConfig::default();
+
+    cfg.set_field("DIFF_EXCLUDE_GLOBS", "*.json, *.lock, *.svg")
+        .unwrap();
+    assert_eq!(
+        cfg.diff_exclude_globs,
+        vec!["*.json", "*.lock", "*.svg"]
+    );
+
+    cfg.set_field("DIFF_EXCLUDE_GLOBS", "").unwrap();
+    assert!(cfg.diff_exclude_globs.is_empty());
+}
+
+#[test]
+fn set_field_auto_update() {
+    let mut cfg = AppConfig::default();
+
+    cfg.set_field("AUTO_UPDATE", "true").unwrap();
+    assert_eq!(cfg.auto_update, Some(true));
+
+    cfg.set_field("AUTO_UPDATE", "false").unwrap();
+    assert_eq!(cfg.auto_update, Some(false));
+
+    cfg.set_field("AUTO_UPDATE", "1").unwrap();
+    assert_eq!(cfg.auto_update, Some(true));
+}
+
+#[test]
+fn set_field_unknown_field_is_ignored() {
+    let mut cfg = AppConfig::default();
+    let original = cfg.provider.clone();
+
+    cfg.set_field("UNKNOWN_FIELD", "value").unwrap();
+    assert_eq!(cfg.provider, original);
+}
+
+#[test]
+fn app_config_default_values() {
+    let cfg = AppConfig::default();
+
+    assert_eq!(cfg.provider, "groq");
+    assert_eq!(cfg.model, "llama-3.3-70b-versatile");
+    assert!(cfg.api_key.is_empty());
+    assert!(cfg.api_url.is_empty());
+    assert!(cfg.api_headers.is_empty());
+    assert_eq!(cfg.locale, "en");
+    assert!(cfg.one_liner);
+    assert_eq!(cfg.commit_template, "$msg");
+    assert!(!cfg.use_gitmoji);
+    assert_eq!(cfg.gitmoji_format, "unicode");
+    assert!(cfg.review_commit);
+    assert_eq!(cfg.post_commit_push, "ask");
+    assert!(!cfg.suppress_tool_output);
+    assert!(cfg.warn_staged_files_enabled);
+    assert_eq!(cfg.warn_staged_files_threshold, 20);
+    assert!(cfg.confirm_new_version);
+    assert!(cfg.auto_update.is_none());
+    assert!(cfg.fallback_enabled);
+    assert!(cfg.track_generated_commits);
+    assert!(!cfg.diff_exclude_globs.is_empty());
+}
+
+#[test]
+fn fields_display_diff_exclude_globs_none() {
+    let mut cfg = AppConfig::default();
+    cfg.diff_exclude_globs.clear();
+
+    let fields = cfg.fields_display();
+    let globs = fields
+        .iter()
+        .find(|(name, _, _)| *name == "Diff Exclude Globs")
+        .expect("diff exclude globs field");
+
+    assert_eq!(globs.2, "(none)");
+}
+
+#[test]
+fn fields_display_api_key_short() {
+    let mut cfg = AppConfig::default();
+    cfg.api_key = "short".into();
+
+    let fields = cfg.fields_display();
+    let key = fields
+        .iter()
+        .find(|(name, _, _)| *name == "API Key")
+        .expect("api key field");
+
+    // Short keys are fully masked
+    assert_eq!(key.2, "*****");
+}
+
+#[test]
+fn fields_display_api_key_empty() {
+    let mut cfg = AppConfig::default();
+    cfg.api_key.clear();
+
+    let fields = cfg.fields_display();
+    let key = fields
+        .iter()
+        .find(|(name, _, _)| *name == "API Key")
+        .expect("api key field");
+
+    assert_eq!(key.2, "(not set)");
+}
+
+#[test]
+#[serial]
+fn save_global_creates_directory_and_file() {
+    let cfg_dir = tempfile::TempDir::new().expect("tempdir");
+    let _env = EnvGuard::set(&[(
+        "ACR_CONFIG_HOME",
+        cfg_dir.path().to_string_lossy().as_ref(),
+    )]);
+
+    let cfg = AppConfig::default();
+    cfg.save_global().expect("save global should succeed");
+
+    let config_path = cfg_dir.path().join("cgen").join("config.toml");
+    assert!(config_path.exists());
+
+    let content = fs::read_to_string(&config_path).expect("read config");
+    assert!(content.contains("provider = \"groq\""));
+}
+
+#[test]
+fn field_description_all_fields() {
+    let descriptions = [
+        "PROVIDER",
+        "MODEL",
+        "API_KEY",
+        "API_URL",
+        "API_HEADERS",
+        "LOCALE",
+        "ONE_LINER",
+        "COMMIT_TEMPLATE",
+        "LLM_SYSTEM_PROMPT",
+        "USE_GITMOJI",
+        "GITMOJI_FORMAT",
+        "REVIEW_COMMIT",
+        "POST_COMMIT_PUSH",
+        "SUPPRESS_TOOL_OUTPUT",
+        "WARN_STAGED_FILES_ENABLED",
+        "WARN_STAGED_FILES_THRESHOLD",
+        "CONFIRM_NEW_VERSION",
+        "AUTO_UPDATE",
+        "FALLBACK_ENABLED",
+        "TRACK_GENERATED_COMMITS",
+        "DIFF_EXCLUDE_GLOBS",
+    ];
+
+    for suffix in descriptions {
+        let desc = field_description(suffix);
+        assert!(
+            !desc.is_empty(),
+            "field_description should return non-empty for {}",
+            suffix
+        );
+    }
+}

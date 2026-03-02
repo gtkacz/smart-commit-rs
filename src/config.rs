@@ -861,3 +861,502 @@ fn parse_dotenv(path: &PathBuf) -> Result<HashMap<String, String>> {
     }
     Ok(map)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_mask_key_short() {
+        assert_eq!(mask_key("abc"), "***");
+        assert_eq!(mask_key("12345678"), "********");
+    }
+
+    #[test]
+    fn test_mask_key_long() {
+        assert_eq!(mask_key("abcdefghij"), "abcd...ghij");
+        assert_eq!(mask_key("sk-1234567890abcdef"), "sk-1...cdef");
+    }
+
+    #[test]
+    fn test_truncate_short() {
+        assert_eq!(truncate("hello", 10), "hello");
+        assert_eq!(truncate("exact", 5), "exact");
+    }
+
+    #[test]
+    fn test_truncate_long() {
+        assert_eq!(truncate("hello world", 5), "hello...");
+        assert_eq!(truncate("abcdefghij", 3), "abc...");
+    }
+
+    #[test]
+    fn test_normalize_post_commit_push() {
+        assert_eq!(normalize_post_commit_push("never"), "never");
+        assert_eq!(normalize_post_commit_push("NEVER"), "never");
+        assert_eq!(normalize_post_commit_push("  Never  "), "never");
+        assert_eq!(normalize_post_commit_push("always"), "always");
+        assert_eq!(normalize_post_commit_push("ALWAYS"), "always");
+        assert_eq!(normalize_post_commit_push("ask"), "ask");
+        assert_eq!(normalize_post_commit_push("unknown"), "ask");
+        assert_eq!(normalize_post_commit_push(""), "ask");
+    }
+
+    #[test]
+    fn test_parse_usize_or_default() {
+        assert_eq!(parse_usize_or_default("10", 5), 10);
+        assert_eq!(parse_usize_or_default("  20  ", 5), 20);
+        assert_eq!(parse_usize_or_default("invalid", 5), 5);
+        assert_eq!(parse_usize_or_default("", 5), 5);
+        assert_eq!(parse_usize_or_default("-1", 5), 5); // negative not valid for usize
+    }
+
+    #[test]
+    fn test_normalize_locale() {
+        assert_eq!(normalize_locale("EN"), "en");
+        assert_eq!(normalize_locale("  pt-BR  "), "pt-br");
+        assert_eq!(normalize_locale(""), "en");
+        assert_eq!(normalize_locale("   "), "en");
+    }
+
+    #[test]
+    fn test_default_functions() {
+        assert_eq!(default_provider(), "groq");
+        assert_eq!(default_model(), "llama-3.3-70b-versatile");
+        assert_eq!(default_locale(), "en");
+        assert!(default_true());
+        assert_eq!(default_post_commit_push(), "ask");
+        assert_eq!(default_commit_template(), "$msg");
+        assert_eq!(default_gitmoji_format(), "unicode");
+        assert_eq!(default_warn_staged_files_threshold(), 20);
+    }
+
+    #[test]
+    fn test_default_diff_exclude_globs() {
+        let globs = default_diff_exclude_globs();
+        assert!(globs.contains(&"*.json".to_string()));
+        assert!(globs.contains(&"*.lock".to_string()));
+        assert!(globs.contains(&"*.png".to_string()));
+    }
+
+    #[test]
+    fn test_parse_dotenv_basic() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "FOO=bar").unwrap();
+        writeln!(file, "BAZ=qux").unwrap();
+        let map = parse_dotenv(&file.path().to_path_buf()).unwrap();
+        assert_eq!(map.get("FOO"), Some(&"bar".to_string()));
+        assert_eq!(map.get("BAZ"), Some(&"qux".to_string()));
+    }
+
+    #[test]
+    fn test_parse_dotenv_with_quotes() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "DOUBLE=\"value with spaces\"").unwrap();
+        writeln!(file, "SINGLE='another value'").unwrap();
+        let map = parse_dotenv(&file.path().to_path_buf()).unwrap();
+        assert_eq!(map.get("DOUBLE"), Some(&"value with spaces".to_string()));
+        assert_eq!(map.get("SINGLE"), Some(&"another value".to_string()));
+    }
+
+    #[test]
+    fn test_parse_dotenv_skips_comments() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "# This is a comment").unwrap();
+        writeln!(file, "KEY=value").unwrap();
+        writeln!(file, "# Another comment").unwrap();
+        let map = parse_dotenv(&file.path().to_path_buf()).unwrap();
+        assert_eq!(map.len(), 1);
+        assert_eq!(map.get("KEY"), Some(&"value".to_string()));
+    }
+
+    #[test]
+    fn test_parse_dotenv_skips_empty_lines() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "").unwrap();
+        writeln!(file, "KEY=value").unwrap();
+        writeln!(file, "   ").unwrap();
+        let map = parse_dotenv(&file.path().to_path_buf()).unwrap();
+        assert_eq!(map.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_dotenv_trims_whitespace() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "  KEY  =  value  ").unwrap();
+        let map = parse_dotenv(&file.path().to_path_buf()).unwrap();
+        assert_eq!(map.get("KEY"), Some(&"value".to_string()));
+    }
+
+    #[test]
+    fn test_field_description_known() {
+        assert!(!field_description("PROVIDER").is_empty());
+        assert!(!field_description("MODEL").is_empty());
+        assert!(!field_description("API_KEY").is_empty());
+        assert!(!field_description("DIFF_EXCLUDE_GLOBS").is_empty());
+    }
+
+    #[test]
+    fn test_field_description_unknown() {
+        assert_eq!(field_description("UNKNOWN_FIELD"), "");
+    }
+
+    #[test]
+    fn test_app_config_default() {
+        let cfg = AppConfig::default();
+        assert_eq!(cfg.provider, "groq");
+        assert_eq!(cfg.model, "llama-3.3-70b-versatile");
+        assert!(cfg.api_key.is_empty());
+        assert!(cfg.one_liner);
+        assert!(!cfg.use_gitmoji);
+        assert!(cfg.fallback_enabled);
+    }
+
+    #[test]
+    fn test_app_config_fields_display() {
+        let cfg = AppConfig::default();
+        let fields = cfg.fields_display();
+        assert!(!fields.is_empty());
+
+        // Check some expected fields
+        let provider_field = fields.iter().find(|(name, _, _)| *name == "Provider");
+        assert!(provider_field.is_some());
+        assert_eq!(provider_field.unwrap().2, "groq");
+    }
+
+    #[test]
+    fn test_app_config_grouped_fields() {
+        let cfg = AppConfig::default();
+        let groups = cfg.grouped_fields();
+
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].name, "Basic");
+        assert_eq!(groups[1].name, "Advanced");
+
+        // Basic group should have direct fields
+        assert!(!groups[0].fields.is_empty());
+
+        // Advanced group should have subgroups
+        assert!(!groups[1].subgroups.is_empty());
+    }
+
+    #[test]
+    fn test_app_config_set_field_string() {
+        let mut cfg = AppConfig::default();
+        cfg.set_field("PROVIDER", "openai").unwrap();
+        assert_eq!(cfg.provider, "openai");
+
+        cfg.set_field("MODEL", "gpt-4").unwrap();
+        assert_eq!(cfg.model, "gpt-4");
+    }
+
+    #[test]
+    fn test_app_config_set_field_bool() {
+        let mut cfg = AppConfig::default();
+
+        cfg.set_field("ONE_LINER", "false").unwrap();
+        assert!(!cfg.one_liner);
+
+        cfg.set_field("ONE_LINER", "true").unwrap();
+        assert!(cfg.one_liner);
+
+        cfg.set_field("ONE_LINER", "1").unwrap();
+        assert!(cfg.one_liner);
+
+        cfg.set_field("USE_GITMOJI", "TRUE").unwrap();
+        assert!(cfg.use_gitmoji);
+    }
+
+    #[test]
+    fn test_app_config_set_field_usize() {
+        let mut cfg = AppConfig::default();
+        cfg.set_field("WARN_STAGED_FILES_THRESHOLD", "50").unwrap();
+        assert_eq!(cfg.warn_staged_files_threshold, 50);
+
+        // Invalid falls back to default
+        cfg.set_field("WARN_STAGED_FILES_THRESHOLD", "invalid").unwrap();
+        assert_eq!(cfg.warn_staged_files_threshold, 20);
+    }
+
+    #[test]
+    fn test_app_config_set_field_diff_globs() {
+        let mut cfg = AppConfig::default();
+        cfg.set_field("DIFF_EXCLUDE_GLOBS", "*.md, *.txt, *.log").unwrap();
+        assert_eq!(cfg.diff_exclude_globs, vec!["*.md", "*.txt", "*.log"]);
+    }
+
+    #[test]
+    fn test_app_config_set_field_post_commit_push() {
+        let mut cfg = AppConfig::default();
+        cfg.set_field("POST_COMMIT_PUSH", "always").unwrap();
+        assert_eq!(cfg.post_commit_push, "always");
+
+        cfg.set_field("POST_COMMIT_PUSH", "NEVER").unwrap();
+        assert_eq!(cfg.post_commit_push, "never");
+
+        cfg.set_field("POST_COMMIT_PUSH", "invalid").unwrap();
+        assert_eq!(cfg.post_commit_push, "ask");
+    }
+
+    #[test]
+    fn test_app_config_set_field_auto_update() {
+        let mut cfg = AppConfig::default();
+        assert!(cfg.auto_update.is_none());
+
+        cfg.set_field("AUTO_UPDATE", "true").unwrap();
+        assert_eq!(cfg.auto_update, Some(true));
+
+        cfg.set_field("AUTO_UPDATE", "false").unwrap();
+        assert_eq!(cfg.auto_update, Some(false));
+    }
+
+    #[test]
+    fn test_app_config_merge_from() {
+        let mut cfg = AppConfig::default();
+        let other = AppConfig {
+            provider: "openai".into(),
+            model: "gpt-4".into(),
+            one_liner: false,
+            ..Default::default()
+        };
+
+        cfg.merge_from(&other);
+        assert_eq!(cfg.provider, "openai");
+        assert_eq!(cfg.model, "gpt-4");
+        assert!(!cfg.one_liner);
+    }
+
+    #[test]
+    fn test_app_config_merge_from_empty_strings_not_merged() {
+        let mut cfg = AppConfig {
+            provider: "groq".into(),
+            api_key: "original-key".into(),
+            ..Default::default()
+        };
+        let other = AppConfig {
+            provider: "".into(), // Empty, should not override
+            api_key: "".into(),  // Empty, should not override
+            ..Default::default()
+        };
+
+        cfg.merge_from(&other);
+        assert_eq!(cfg.provider, "groq"); // Not changed
+        assert_eq!(cfg.api_key, "original-key"); // Not changed
+    }
+
+    #[test]
+    fn test_validate_locale_en() {
+        assert!(validate_locale("en").is_ok());
+    }
+
+    #[test]
+    fn test_validate_locale_invalid() {
+        let result = validate_locale("xx-unknown");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Unsupported locale"));
+    }
+
+    #[test]
+    fn test_env_field_map_coverage() {
+        // Ensure all important fields are in the map
+        let suffixes: Vec<&str> = ENV_FIELD_MAP.iter().map(|(s, _)| *s).collect();
+        assert!(suffixes.contains(&"PROVIDER"));
+        assert!(suffixes.contains(&"MODEL"));
+        assert!(suffixes.contains(&"API_KEY"));
+        assert!(suffixes.contains(&"DIFF_EXCLUDE_GLOBS"));
+        assert!(suffixes.contains(&"FALLBACK_ENABLED"));
+    }
+
+    #[test]
+    fn test_apply_env_map_all_fields() {
+        let mut cfg = AppConfig::default();
+        let mut map = HashMap::new();
+
+        map.insert("ACR_PROVIDER".into(), "openai".into());
+        map.insert("ACR_MODEL".into(), "gpt-4".into());
+        map.insert("ACR_API_KEY".into(), "sk-test".into());
+        map.insert("ACR_API_URL".into(), "https://custom.api".into());
+        map.insert("ACR_API_HEADERS".into(), "X-Custom: value".into());
+        map.insert("ACR_LOCALE".into(), "en".into());
+        map.insert("ACR_ONE_LINER".into(), "false".into());
+        map.insert("ACR_COMMIT_TEMPLATE".into(), "custom: $msg".into());
+        map.insert("ACR_LLM_SYSTEM_PROMPT".into(), "custom prompt".into());
+        map.insert("ACR_USE_GITMOJI".into(), "true".into());
+        map.insert("ACR_GITMOJI_FORMAT".into(), "shortcode".into());
+        map.insert("ACR_REVIEW_COMMIT".into(), "false".into());
+        map.insert("ACR_POST_COMMIT_PUSH".into(), "always".into());
+        map.insert("ACR_SUPPRESS_TOOL_OUTPUT".into(), "true".into());
+        map.insert("ACR_WARN_STAGED_FILES_ENABLED".into(), "false".into());
+        map.insert("ACR_WARN_STAGED_FILES_THRESHOLD".into(), "50".into());
+        map.insert("ACR_CONFIRM_NEW_VERSION".into(), "false".into());
+        map.insert("ACR_AUTO_UPDATE".into(), "true".into());
+        map.insert("ACR_FALLBACK_ENABLED".into(), "false".into());
+        map.insert("ACR_TRACK_GENERATED_COMMITS".into(), "false".into());
+        map.insert("ACR_DIFF_EXCLUDE_GLOBS".into(), "*.md,*.txt".into());
+
+        cfg.apply_env_map(&map, false);
+
+        assert_eq!(cfg.provider, "openai");
+        assert_eq!(cfg.model, "gpt-4");
+        assert_eq!(cfg.api_key, "sk-test");
+        assert_eq!(cfg.api_url, "https://custom.api");
+        assert_eq!(cfg.api_headers, "X-Custom: value");
+        assert!(!cfg.one_liner);
+        assert_eq!(cfg.commit_template, "custom: $msg");
+        assert_eq!(cfg.llm_system_prompt, "custom prompt");
+        assert!(cfg.use_gitmoji);
+        assert_eq!(cfg.gitmoji_format, "shortcode");
+        assert!(!cfg.review_commit);
+        assert_eq!(cfg.post_commit_push, "always");
+        assert!(cfg.suppress_tool_output);
+        assert!(!cfg.warn_staged_files_enabled);
+        assert_eq!(cfg.warn_staged_files_threshold, 50);
+        assert!(!cfg.confirm_new_version);
+        assert_eq!(cfg.auto_update, Some(true));
+        assert!(!cfg.fallback_enabled);
+        assert!(!cfg.track_generated_commits);
+        assert_eq!(cfg.diff_exclude_globs, vec!["*.md", "*.txt"]);
+    }
+
+    #[test]
+    fn test_apply_env_map_auto_update_skipped_for_local() {
+        let mut cfg = AppConfig::default();
+        let mut map = HashMap::new();
+        map.insert("ACR_AUTO_UPDATE".into(), "true".into());
+
+        // from_local = true should skip auto_update
+        cfg.apply_env_map(&map, true);
+        assert!(cfg.auto_update.is_none());
+
+        // from_local = false should apply auto_update
+        cfg.apply_env_map(&map, false);
+        assert_eq!(cfg.auto_update, Some(true));
+    }
+
+    #[test]
+    fn test_apply_env_map_boolean_variations() {
+        let mut cfg = AppConfig::default();
+        let mut map = HashMap::new();
+
+        // Test "1" as true
+        map.insert("ACR_USE_GITMOJI".into(), "1".into());
+        cfg.apply_env_map(&map, false);
+        assert!(cfg.use_gitmoji);
+
+        // Test "TRUE" (uppercase)
+        map.clear();
+        map.insert("ACR_REVIEW_COMMIT".into(), "TRUE".into());
+        cfg.review_commit = false;
+        cfg.apply_env_map(&map, false);
+        assert!(cfg.review_commit);
+    }
+
+    #[test]
+    fn test_merge_from_with_all_fields() {
+        let mut cfg = AppConfig::default();
+        let other = AppConfig {
+            provider: "anthropic".into(),
+            model: "claude-3".into(),
+            api_key: "sk-ant".into(),
+            api_url: "https://api.anthropic.com".into(),
+            api_headers: "x-api-key: test".into(),
+            locale: "es".into(),
+            one_liner: false,
+            commit_template: "feat: $msg".into(),
+            llm_system_prompt: "custom".into(),
+            use_gitmoji: true,
+            gitmoji_format: "shortcode".into(),
+            review_commit: false,
+            post_commit_push: "never".into(),
+            suppress_tool_output: true,
+            warn_staged_files_enabled: false,
+            warn_staged_files_threshold: 100,
+            confirm_new_version: false,
+            auto_update: Some(true),
+            fallback_enabled: false,
+            track_generated_commits: false,
+            diff_exclude_globs: vec!["*.log".into()],
+        };
+
+        cfg.merge_from(&other);
+
+        assert_eq!(cfg.provider, "anthropic");
+        assert_eq!(cfg.api_url, "https://api.anthropic.com");
+        assert_eq!(cfg.api_headers, "x-api-key: test");
+        assert_eq!(cfg.auto_update, Some(true));
+    }
+
+    #[test]
+    fn test_fields_display_with_custom_values() {
+        let cfg = AppConfig {
+            api_key: "short".into(), // Short key gets masked differently
+            api_url: "https://custom.url".into(),
+            api_headers: "X-Custom: value".into(),
+            use_gitmoji: true,
+            review_commit: false,
+            suppress_tool_output: true,
+            warn_staged_files_enabled: false,
+            confirm_new_version: false,
+            auto_update: Some(false),
+            fallback_enabled: false,
+            track_generated_commits: false,
+            diff_exclude_globs: vec![],
+            ..Default::default()
+        };
+
+        let fields = cfg.fields_display();
+
+        // Find specific fields and check their values
+        let api_url = fields.iter().find(|(n, _, _)| *n == "API URL").unwrap();
+        assert_eq!(api_url.2, "https://custom.url");
+
+        let api_headers = fields.iter().find(|(n, _, _)| *n == "API Headers").unwrap();
+        assert_eq!(api_headers.2, "X-Custom: value");
+
+        let gitmoji = fields.iter().find(|(n, _, _)| *n == "Use Gitmoji").unwrap();
+        assert_eq!(gitmoji.2, "enabled");
+
+        let review = fields.iter().find(|(n, _, _)| *n == "Review Commit").unwrap();
+        assert_eq!(review.2, "disabled");
+
+        let suppress = fields.iter().find(|(n, _, _)| *n == "Suppress Tool Output").unwrap();
+        assert_eq!(suppress.2, "enabled");
+
+        let warn = fields.iter().find(|(n, _, _)| *n == "Warn Staged Files").unwrap();
+        assert_eq!(warn.2, "disabled");
+
+        let confirm = fields.iter().find(|(n, _, _)| *n == "Confirm New Version").unwrap();
+        assert_eq!(confirm.2, "disabled");
+
+        let auto = fields.iter().find(|(n, _, _)| *n == "Auto Update").unwrap();
+        assert_eq!(auto.2, "disabled");
+
+        let fallback = fields.iter().find(|(n, _, _)| *n == "Fallback Enabled").unwrap();
+        assert_eq!(fallback.2, "disabled");
+
+        let track = fields.iter().find(|(n, _, _)| *n == "Track Generated Commits").unwrap();
+        assert_eq!(track.2, "disabled");
+
+        let globs = fields.iter().find(|(n, _, _)| *n == "Diff Exclude Globs").unwrap();
+        assert_eq!(globs.2, "(none)");
+    }
+
+    #[test]
+    fn test_set_field_locale_validation() {
+        let mut cfg = AppConfig::default();
+        // Valid locale
+        let result = cfg.set_field("LOCALE", "en");
+        assert!(result.is_ok());
+        assert_eq!(cfg.locale, "en");
+    }
+
+    #[test]
+    fn test_set_field_unknown_does_nothing() {
+        let mut cfg = AppConfig::default();
+        let original_provider = cfg.provider.clone();
+        cfg.set_field("UNKNOWN_FIELD", "value").unwrap();
+        assert_eq!(cfg.provider, original_provider);
+    }
+}
