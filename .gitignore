@@ -31,3 +31,4 @@ target
 .chunkhound.json
 .mcp.json
 .python-version
+lcov.info

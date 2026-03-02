@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use auto_commit_rs::{cache, cli, config, git, preset, prompt, provider, ui, update};
 use colored::Colorize;
 use inquire::{Select, Text};
+use std::time::Instant;
 
 fn main() {
     if let Err(e) = run() {
@@ -106,11 +107,17 @@ fn run_standard_commit(cfg: &config::AppConfig, cli: &cli::Cli) -> Result<()> {
         }
     }
 
+    let gen_start = Instant::now();
     let diff = git::get_staged_diff_filtered(&cfg.diff_exclude_globs)
         .context("Failed to get staged diff")?;
-    let Some(final_msg) = generate_final_message(cfg, &diff, cli.verbose)? else {
+    let Some((final_msg, time_to_ready)) = generate_final_message(cfg, &diff, cli.verbose, gen_start)? else {
         return Ok(());
     };
+    if cli.verbose {
+        if let Some(elapsed) = time_to_ready {
+            println!("  {} {}", "Generated in".dimmed(), format!("{:.2}s", elapsed.as_secs_f64()).dimmed());
+        }
+    }
 
     if cli.dry_run {
         println!(
@@ -168,9 +175,15 @@ fn run_alter(cfg: &config::AppConfig, cli: &cli::Cli, commits: &[String]) -> Res
         }
     }
 
-    let Some(final_msg) = generate_final_message(cfg, &diff, cli.verbose)? else {
+    let gen_start = Instant::now();
+    let Some((final_msg, time_to_ready)) = generate_final_message(cfg, &diff, cli.verbose, gen_start)? else {
         return Ok(());
     };
+    if cli.verbose {
+        if let Some(elapsed) = time_to_ready {
+            println!("  {} {}", "Generated in".dimmed(), format!("{:.2}s", elapsed.as_secs_f64()).dimmed());
+        }
+    }
 
     if cli.dry_run {
         println!(
@@ -237,7 +250,8 @@ fn generate_final_message(
     cfg: &config::AppConfig,
     diff: &str,
     verbose: bool,
-) -> Result<Option<String>> {
+    gen_start: Instant,
+) -> Result<Option<(String, Option<std::time::Duration>)>> {
     let system_prompt = prompt::build_system_prompt(cfg);
     if verbose {
         println!("\n{}", "LLM system prompt:".cyan().bold());
@@ -255,10 +269,15 @@ fn generate_final_message(
         );
     }
 
+    let mut time_to_ready: Option<std::time::Duration> = None;
+
     let final_msg = if cfg.review_commit {
         loop {
             let candidate = cfg.commit_template.replace("$msg", message.trim());
 
+            if time_to_ready.is_none() {
+                time_to_ready = Some(gen_start.elapsed());
+            }
             println!("\n{}", "Commit message:".green().bold());
             println!("  {}\n", candidate);
 
@@ -291,11 +310,12 @@ fn generate_final_message(
         }
     } else {
         let final_msg = cfg.commit_template.replace("$msg", message.trim());
+        time_to_ready = Some(gen_start.elapsed());
         println!("\n{} {}", "Commit message:".green().bold(), final_msg);
         final_msg
     };
 
-    Ok(Some(final_msg))
+    Ok(Some((final_msg, time_to_ready)))
 }
 
 fn create_semver_tag(cfg: &config::AppConfig) -> Result<()> {

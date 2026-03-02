@@ -39,6 +39,20 @@ fn prompt_includes_shortcode_gitmoji_and_locale_when_configured() {
 }
 
 #[test]
+fn prompt_gitmoji_does_not_override_conventional_commits() {
+    let mut cfg = AppConfig::default();
+    cfg.use_gitmoji = true;
+    cfg.gitmoji_format = "unicode".into();
+
+    let prompt = build_system_prompt(&cfg);
+    assert!(prompt.contains("following the Conventional Commits specification"));
+    assert!(prompt.contains("Conventional Commits specification above"));
+    assert!(prompt.contains("type(scope):"));
+    assert!(prompt.contains("feat(api):"));
+    assert!(prompt.contains("fix(auth):"));
+}
+
+#[test]
 fn prompt_uses_custom_base_prompt() {
     let mut cfg = AppConfig::default();
     cfg.llm_system_prompt = "custom base prompt".into();

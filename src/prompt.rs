@@ -19,14 +19,16 @@ Rules to follow:
 6. Breaking Changes: MUST be indicated by either an exclamation mark `!` immediately before the colon (e.g., `feat!:`) OR an uppercase `BREAKING CHANGE: <description>` in the footer.";
 
 const GITMOJI_UNICODE_SPEC: &str = "\
-Use Gitmoji: start the commit message with a relevant emoji in unicode format.
-Examples: \u{26a1}\u{fe0f} Improve performance, \u{1f41b} Fix bug, \u{2728} Add new feature, \
-\u{267b}\u{fe0f} Refactor code, \u{1f4dd} Update docs, \u{1f3a8} Improve UI";
+Use Gitmoji while still following the Conventional Commits specification above: \
+prepend a relevant emoji in unicode format, then a space, then the conventional type(scope): description. \
+Examples: \u{26a1}\u{fe0f} feat(api): improve response time, \u{1f41b} fix(auth): correct login redirect, \
+\u{2728} feat: add new feature, \u{267b}\u{fe0f} refactor(parser): simplify logic, \u{1f4dd} docs: update README, \u{1f3a8} style(ui): improve layout";
 
 const GITMOJI_SHORTCODE_SPEC: &str = "\
-Use Gitmoji: start the commit message with a relevant emoji in :shortcode: format.
-Examples: :zap: Improve performance, :bug: Fix bug, :sparkles: Add new feature, \
-:recycle: Refactor code, :memo: Update docs, :art: Improve UI";
+Use Gitmoji while still following the Conventional Commits specification above: \
+prepend a relevant emoji in :shortcode: format, then a space, then the conventional type(scope): description. \
+Examples: :zap: feat(api): improve response time, :bug: fix(auth): correct login redirect, \
+:sparkles: feat: add new feature, :recycle: refactor(parser): simplify logic, :memo: docs: update README, :art: style(ui): improve layout";
 
 /// Build the full system prompt from config flags
 pub fn build_system_prompt(cfg: &AppConfig) -> String {
