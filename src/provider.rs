@@ -12,6 +12,7 @@ enum RequestFormat {
     Gemini,
     OpenAiCompat,
     Anthropic,
+    LmStudio,
 }
 
 struct ProviderDef {
@@ -102,6 +103,13 @@ fn get_provider(name: &str) -> Option<ProviderDef> {
             format: RequestFormat::OpenAiCompat,
             response_path: "choices.0.message.content",
         }),
+        "lm_studio" => Some(ProviderDef {
+            api_url: "http://localhost:1234/api/v1/chat",
+            api_headers: "Content-Type: application/json",
+            default_model: "qwen/qwen3.5-35b-a3b",
+            format: RequestFormat::LmStudio,
+            response_path: "output",
+        }),
         _ => None,
     }
 }
@@ -173,7 +181,7 @@ fn call_llm_inner(cfg: &AppConfig, system_prompt: &str, diff: &str) -> Result<St
         .into_json()
         .map_err(|e| LlmCallError::Other(anyhow::anyhow!("Failed to parse API response as JSON: {e}")))?;
 
-    let message = extract_by_path(&json, &response_path).map_err(|e| {
+    let message = extract_message(&json, format, &response_path).map_err(|e| {
         LlmCallError::Other(anyhow::anyhow!(
             "Failed to extract message from response at path '{}'. Response:\n{}\nError: {}",
             response_path,
@@ -344,6 +352,12 @@ fn build_request_body(
                 "max_tokens": 512
             })
         }
+        RequestFormat::LmStudio => {
+            serde_json::json!({
+                "model": model,
+                "input": diff
+            })
+        }
     }
 }
 
@@ -379,6 +393,29 @@ fn extract_by_path(value: &Value, path: &str) -> Result<String> {
         .as_str()
         .map(|s| s.to_string())
         .with_context(|| "Expected string value at path end".to_string())
+}
+
+fn extract_message(value: &Value, format: RequestFormat, response_path: &str) -> Result<String> {
+    match format {
+        RequestFormat::LmStudio => {
+            let output = value
+                .get(response_path)
+                .and_then(Value::as_array)
+                .with_context(|| format!("Key '{response_path}' not found or is not an array"))?;
+
+            let message = output
+                .iter()
+                .find(|item| item.get("type").and_then(Value::as_str) == Some("message"))
+                .with_context(|| "No output item with type 'message' found".to_string())?;
+
+            message
+                .get("content")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .with_context(|| "Expected string 'content' in message output item".to_string())
+        }
+        _ => extract_by_path(value, response_path),
+    }
 }
 
 #[cfg(test)]
@@ -544,6 +581,19 @@ mod tests {
     }
 
     #[test]
+    fn test_build_request_body_lm_studio() {
+        let body = build_request_body(
+            RequestFormat::LmStudio,
+            "qwen/qwen3.5-35b-a3b",
+            "system prompt",
+            "user diff",
+        );
+        assert_eq!(body["model"], "qwen/qwen3.5-35b-a3b");
+        assert_eq!(body["input"], "user diff");
+        assert!(body.get("messages").is_none());
+    }
+
+    #[test]
     fn test_get_provider_known() {
         assert!(get_provider("gemini").is_some());
         assert!(get_provider("openai").is_some());
@@ -556,6 +606,7 @@ mod tests {
         assert!(get_provider("together").is_some());
         assert!(get_provider("fireworks").is_some());
         assert!(get_provider("perplexity").is_some());
+        assert!(get_provider("lm_studio").is_some());
     }
 
     #[test]
@@ -582,10 +633,29 @@ mod tests {
 
     #[test]
     fn test_get_provider_openai_compat() {
-        for name in &["openai", "groq", "grok", "deepseek", "openrouter", "mistral", "together", "fireworks", "perplexity"] {
+        for name in &[
+            "openai",
+            "groq",
+            "grok",
+            "deepseek",
+            "openrouter",
+            "mistral",
+            "together",
+            "fireworks",
+            "perplexity",
+        ] {
             let provider = get_provider(name).unwrap();
             assert_eq!(provider.format, RequestFormat::OpenAiCompat, "Provider {name} should use OpenAiCompat format");
         }
+    }
+
+    #[test]
+    fn test_get_provider_lm_studio_format() {
+        let provider = get_provider("lm_studio").unwrap();
+        assert_eq!(provider.format, RequestFormat::LmStudio);
+        assert_eq!(provider.api_url, "http://localhost:1234/api/v1/chat");
+        assert_eq!(provider.api_headers, "Content-Type: application/json");
+        assert_eq!(provider.default_model, "qwen/qwen3.5-35b-a3b");
     }
 
     #[test]
@@ -593,6 +663,7 @@ mod tests {
         assert_eq!(default_model_for("groq"), "llama-3.3-70b-versatile");
         assert_eq!(default_model_for("openai"), "gpt-4o-mini");
         assert_eq!(default_model_for("anthropic"), "claude-sonnet-4-20250514");
+        assert_eq!(default_model_for("lm_studio"), "qwen/qwen3.5-35b-a3b");
     }
 
     #[test]
@@ -686,6 +757,34 @@ mod tests {
         assert_eq!(RequestFormat::Gemini, RequestFormat::Gemini);
         assert_eq!(RequestFormat::OpenAiCompat, RequestFormat::OpenAiCompat);
         assert_eq!(RequestFormat::Anthropic, RequestFormat::Anthropic);
+        assert_eq!(RequestFormat::LmStudio, RequestFormat::LmStudio);
         assert_ne!(RequestFormat::Gemini, RequestFormat::OpenAiCompat);
+    }
+
+    #[test]
+    fn test_extract_message_lm_studio_message_item() {
+        let json = serde_json::json!({
+            "output": [
+                { "type": "reasoning", "content": "thinking" },
+                { "type": "message", "content": "feat: lm studio response" }
+            ]
+        });
+        let result = extract_message(&json, RequestFormat::LmStudio, "output").unwrap();
+        assert_eq!(result, "feat: lm studio response");
+    }
+
+    #[test]
+    fn test_extract_message_lm_studio_missing_message_item() {
+        let json = serde_json::json!({
+            "output": [
+                { "type": "reasoning", "content": "thinking only" }
+            ]
+        });
+        let result = extract_message(&json, RequestFormat::LmStudio, "output");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("type 'message'"));
     }
 }

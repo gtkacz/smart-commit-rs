@@ -49,6 +49,10 @@ fn default_model_for_all_known_providers() {
         "accounts/fireworks/models/llama-v3p3-70b-instruct"
     );
     assert_eq!(provider::default_model_for("perplexity"), "sonar");
+    assert_eq!(
+        provider::default_model_for("lm_studio"),
+        "qwen/qwen3.5-35b-a3b"
+    );
 }
 
 #[test]
@@ -335,6 +339,34 @@ fn call_llm_perplexity_provider() {
     let cfg = cfg_for("perplexity", format!("{}/perplexity", server.url()));
     let msg = provider::call_llm(&cfg, "system", "diff").expect("llm call");
     assert_eq!(msg, "perplexity response");
+    mock.assert();
+}
+
+#[test]
+fn call_llm_lm_studio_provider() {
+    let mut server = Server::new();
+    let mock = server
+        .mock("POST", "/lm-studio")
+        .match_header("content-type", "application/json")
+        .match_body(Matcher::Regex(r#""model":"test-model""#.into()))
+        .match_body(Matcher::Regex(r#""input":"diff""#.into()))
+        .with_status(200)
+        .with_body(
+            r#"{
+                "model_instance_id":"abc",
+                "output":[
+                    {"type":"reasoning","content":"thinking"},
+                    {"type":"message","content":"lm studio response"}
+                ],
+                "stats":{"tokens":123},
+                "response_id":"res_1"
+            }"#,
+        )
+        .create();
+
+    let cfg = cfg_for("lm_studio", format!("{}/lm-studio", server.url()));
+    let msg = provider::call_llm(&cfg, "system", "diff").expect("llm call");
+    assert_eq!(msg, "lm studio response");
     mock.assert();
 }
 

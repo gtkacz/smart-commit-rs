@@ -111,7 +111,7 @@ All settings use the `ACR_` prefix. Layered resolution: defaults → global TOML
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ACR_PROVIDER` | `groq` | LLM provider (`groq`, `openai`, `anthropic`, `gemini`, `grok`, `deepseek`, `openrouter`, `mistral`, `together`, `fireworks`, `perplexity`, or custom) |
+| `ACR_PROVIDER` | `groq` | LLM provider (`groq`, `openai`, `anthropic`, `gemini`, `grok`, `deepseek`, `openrouter`, `mistral`, `together`, `fireworks`, `perplexity`, `lm_studio`, or custom) |
 | `ACR_MODEL` | `llama-3.3-70b-versatile` | Model name |
 | `ACR_API_KEY` |, | API key (required) |
 | `ACR_API_URL` | auto | API endpoint (auto-resolved from provider) |
@@ -232,7 +232,7 @@ When `ACR_TRACK_GENERATED_COMMITS=1` (default), cgen records each AI-generated c
 
 ## Providers
 
-Built-in providers: **Groq** (default), **OpenAI**, **Anthropic**, **Gemini**, **Grok**, **DeepSeek**, **OpenRouter**, **Mistral**, **Together**, **Fireworks**, **Perplexity**.
+Built-in providers: **Groq** (default), **OpenAI**, **Anthropic**, **Gemini**, **Grok**, **DeepSeek**, **OpenRouter**, **Mistral**, **Together**, **Fireworks**, **Perplexity**, **LM Studio**.
 
 | Provider | Default Model |
 |----------|---------------|
@@ -247,6 +247,7 @@ Built-in providers: **Groq** (default), **OpenAI**, **Anthropic**, **Gemini**, *
 | together | meta-llama/Llama-3.3-70B-Instruct-Turbo |
 | fireworks | accounts/fireworks/models/llama-v3p3-70b-instruct |
 | perplexity | sonar |
+| lm_studio | qwen/qwen3.5-35b-a3b |
 
 For custom providers, set `ACR_PROVIDER` to any name and provide `ACR_API_URL`. Custom providers default to OpenAI-compatible request format.
 

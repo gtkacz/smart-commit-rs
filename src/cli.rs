@@ -388,6 +388,7 @@ fn edit_field(suffix: &str, cfg: &AppConfig) -> Option<String> {
                 "together",
                 "fireworks",
                 "perplexity",
+                "lm_studio",
                 "(custom)",
             ];
             match Select::new("Provider:", choices).prompt() {

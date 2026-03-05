@@ -18,7 +18,8 @@ const DEFAULT_SYSTEM_PROMPT: &str = "You are to act as an author of a commit mes
 Your mission is to create clean and comprehensive commit messages as per
 the Conventional Commit specification and explain WHAT were the changes and mainly WHY the changes were done.
 I'll send you an output of 'git diff --staged' command, and you are to convert
-it into a commit message. Use the present tense.";
+it into a commit message. Use the present tense.
+Lines must not be longer than 80 characters. Use english for the commit message.";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -95,9 +96,23 @@ fn default_warn_staged_files_threshold() -> usize {
 }
 fn default_diff_exclude_globs() -> Vec<String> {
     vec![
-        "*.json", "*.xml", "*.csv", "*.pdf", "*.lock",
-        "*.svg", "*.png", "*.jpg", "*.jpeg", "*.gif", "*.ico",
-        "*.woff", "*.woff2", "*.ttf", "*.eot", "*.min.js", "*.min.css",
+        "*.json",
+        "*.xml",
+        "*.csv",
+        "*.pdf",
+        "*.lock",
+        "*.svg",
+        "*.png",
+        "*.jpg",
+        "*.jpeg",
+        "*.gif",
+        "*.ico",
+        "*.woff",
+        "*.woff2",
+        "*.ttf",
+        "*.eot",
+        "*.min.js",
+        "*.min.css",
     ]
     .into_iter()
     .map(String::from)
@@ -1076,14 +1091,16 @@ mod tests {
         assert_eq!(cfg.warn_staged_files_threshold, 50);
 
         // Invalid falls back to default
-        cfg.set_field("WARN_STAGED_FILES_THRESHOLD", "invalid").unwrap();
+        cfg.set_field("WARN_STAGED_FILES_THRESHOLD", "invalid")
+            .unwrap();
         assert_eq!(cfg.warn_staged_files_threshold, 20);
     }
 
     #[test]
     fn test_app_config_set_field_diff_globs() {
         let mut cfg = AppConfig::default();
-        cfg.set_field("DIFF_EXCLUDE_GLOBS", "*.md, *.txt, *.log").unwrap();
+        cfg.set_field("DIFF_EXCLUDE_GLOBS", "*.md, *.txt, *.log")
+            .unwrap();
         assert_eq!(cfg.diff_exclude_globs, vec!["*.md", "*.txt", "*.log"]);
     }
 
@@ -1155,7 +1172,10 @@ mod tests {
     fn test_validate_locale_invalid() {
         let result = validate_locale("xx-unknown");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Unsupported locale"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Unsupported locale"));
     }
 
     #[test]
@@ -1318,28 +1338,49 @@ mod tests {
         let gitmoji = fields.iter().find(|(n, _, _)| *n == "Use Gitmoji").unwrap();
         assert_eq!(gitmoji.2, "enabled");
 
-        let review = fields.iter().find(|(n, _, _)| *n == "Review Commit").unwrap();
+        let review = fields
+            .iter()
+            .find(|(n, _, _)| *n == "Review Commit")
+            .unwrap();
         assert_eq!(review.2, "disabled");
 
-        let suppress = fields.iter().find(|(n, _, _)| *n == "Suppress Tool Output").unwrap();
+        let suppress = fields
+            .iter()
+            .find(|(n, _, _)| *n == "Suppress Tool Output")
+            .unwrap();
         assert_eq!(suppress.2, "enabled");
 
-        let warn = fields.iter().find(|(n, _, _)| *n == "Warn Staged Files").unwrap();
+        let warn = fields
+            .iter()
+            .find(|(n, _, _)| *n == "Warn Staged Files")
+            .unwrap();
         assert_eq!(warn.2, "disabled");
 
-        let confirm = fields.iter().find(|(n, _, _)| *n == "Confirm New Version").unwrap();
+        let confirm = fields
+            .iter()
+            .find(|(n, _, _)| *n == "Confirm New Version")
+            .unwrap();
         assert_eq!(confirm.2, "disabled");
 
         let auto = fields.iter().find(|(n, _, _)| *n == "Auto Update").unwrap();
         assert_eq!(auto.2, "disabled");
 
-        let fallback = fields.iter().find(|(n, _, _)| *n == "Fallback Enabled").unwrap();
+        let fallback = fields
+            .iter()
+            .find(|(n, _, _)| *n == "Fallback Enabled")
+            .unwrap();
         assert_eq!(fallback.2, "disabled");
 
-        let track = fields.iter().find(|(n, _, _)| *n == "Track Generated Commits").unwrap();
+        let track = fields
+            .iter()
+            .find(|(n, _, _)| *n == "Track Generated Commits")
+            .unwrap();
         assert_eq!(track.2, "disabled");
 
-        let globs = fields.iter().find(|(n, _, _)| *n == "Diff Exclude Globs").unwrap();
+        let globs = fields
+            .iter()
+            .find(|(n, _, _)| *n == "Diff Exclude Globs")
+            .unwrap();
         assert_eq!(globs.2, "(none)");
     }
 

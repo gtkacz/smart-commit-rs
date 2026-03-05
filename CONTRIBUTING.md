@@ -153,7 +153,8 @@ This is one of the easiest and most valuable ways to contribute. A default provi
    "your_provider" => Some(ProviderDef {
        api_url: "https://api.example.com/v1/chat/completions",
        api_headers: "Authorization: Bearer $ACR_API_KEY",
-       format: RequestFormat::OpenAiCompat, // or Gemini, Anthropic
+       default_model: "your-model",
+       format: RequestFormat::OpenAiCompat, // or Gemini, Anthropic, LmStudio
        response_path: "choices.0.message.content",
    }),
    ```
@@ -162,12 +163,14 @@ This is one of the easiest and most valuable ways to contribute. A default provi
    - `OpenAiCompat` — Most providers use this (OpenAI-compatible chat completions). Request body: `{ model, messages: [{role, content}], max_tokens, temperature }`.
    - `Gemini` — Google's format with `system_instruction` and `contents` arrays.
    - `Anthropic` — Similar to OpenAI but with `system` as a top-level string field.
+   - `LmStudio` — LM Studio chat endpoint format. Request body: `{ model, input }`.
 
    If the provider uses a completely different format, you may need to add a new variant to `RequestFormat` and a matching arm in `build_request_body()`.
 
 4. **Set `response_path`** — this is a dot-separated path to the generated text in the JSON response. For example:
    - OpenAI-compatible: `choices.0.message.content`
    - Gemini: `candidates.0.content.parts.0.text`
+   - LM Studio: `output` (the parser selects the item where `type == "message"` and returns its `content`)
    - Use numbers for array indices: `results.0.text`
 
 5. **URL/header interpolation** — you can use `$ACR_API_KEY`, `$ACR_MODEL`, or any environment variable in the `api_url` and `api_headers` strings. They get expanded at runtime.
@@ -191,12 +194,25 @@ This is one of the easiest and most valuable ways to contribute. A default provi
 "mistral" => Some(ProviderDef {
     api_url: "https://api.mistral.ai/v1/chat/completions",
     api_headers: "Authorization: Bearer $ACR_API_KEY",
+    default_model: "mistral-small-latest",
     format: RequestFormat::OpenAiCompat,
     response_path: "choices.0.message.content",
 }),
 ```
 
-That's it — most OpenAI-compatible providers are just 5 lines.
+### Example: Adding LM Studio
+
+```rust
+"lm_studio" => Some(ProviderDef {
+    api_url: "http://localhost:1234/api/v1/chat",
+    api_headers: "Content-Type: application/json",
+    default_model: "qwen/qwen3.5-35b-a3b",
+    format: RequestFormat::LmStudio,
+    response_path: "output",
+}),
+```
+
+That's it — most OpenAI-compatible providers are short additions, while custom payload APIs (like LM Studio) need a dedicated request/response format branch.
 
 ## Making Changes
 
