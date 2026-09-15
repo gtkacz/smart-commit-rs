@@ -11,8 +11,8 @@ uses short timeouts and bounded responses, authenticates with the configured
 credentials, and filters non-generation models when the provider exposes that
 metadata. OpenAI, Anthropic, Gemini, Groq, Grok, DeepSeek, OpenRouter, Mistral,
 Together, Fireworks, LM Studio, and Ollama support live discovery. Perplexity
-uses the manual fallback because its current list endpoint is for a different
-API surface.
+and CLI harnesses use manual model entry; leaving the model blank tells a CLI
+harness to use its own configured default.
 
 | Provider | Default Model | API key |
 |----------|---------------|---------|
@@ -29,9 +29,31 @@ API surface.
 | `perplexity` | sonar | required |
 | `lm_studio` | qwen/qwen3.5-35b-a3b | not needed (local) |
 | `ollama` | llama3 | not needed (local) |
+| `claude_code` | harness default | not needed (Claude Code login) |
+| `codex` | harness default | not needed (Codex login) |
+| `opencode` | harness default | not needed (OpenCode login) |
+| `gemini_cli` | harness default | not needed (Gemini CLI login) |
 
 `lm_studio` and `ollama` talk to a locally running server, so commit generation
 stays entirely on your machine.
+
+## Local CLI harnesses
+
+The `claude_code`, `codex`, `opencode`, and `gemini_cli` providers invoke the
+corresponding executable already installed on `PATH`. Authenticate that CLI
+normally before using it with `cgen`. For example:
+
+```sh
+export ACR_PROVIDER=codex
+export ACR_MODEL= # optional; leave blank to use the Codex default
+cgen --dry-run
+```
+
+Harnesses run in non-interactive, read-only/plan mode and receive the commit
+prompt over standard input. They ignore `ACR_API_KEY`, `ACR_API_URL`, and
+`ACR_API_HEADERS`. `gemini` remains the direct Google API provider;
+`gemini_cli` invokes the locally installed Gemini CLI. Hyphenated
+`claude-code` and `gemini-cli` aliases are also accepted.
 
 ## Custom providers
 

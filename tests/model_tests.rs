@@ -65,6 +65,15 @@ fn arbitrary_custom_endpoints_and_perplexity_use_manual_fallback() {
         ..AppConfig::default()
     };
     assert!(provider::model_list_spec(&perplexity).is_none());
+
+    for provider_name in ["claude_code", "codex", "opencode", "gemini_cli"] {
+        let harness = AppConfig {
+            provider: provider_name.into(),
+            api_url: "https://ignored.test/v1/chat/completions".into(),
+            ..AppConfig::default()
+        };
+        assert!(provider::model_list_spec(&harness).is_none());
+    }
 }
 
 #[test]

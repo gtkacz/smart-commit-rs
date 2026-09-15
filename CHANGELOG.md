@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-09-15
+
+### Added
+
+- Local CLI harness providers for Claude Code (`claude_code`), Codex (`codex`),
+  OpenCode (`opencode`), and Gemini CLI (`gemini_cli`), using each harness's
+  existing authentication and optional default model
+
 ## [1.5.0] - 2026-07-28
 
 ### Added

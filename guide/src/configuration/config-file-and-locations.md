@@ -14,7 +14,7 @@ comments; choosing "Inherit global value" removes that local assignment.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ACR_PROVIDER` | `groq` | LLM provider (`groq`, `openai`, `anthropic`, `gemini`, `grok`, `deepseek`, `openrouter`, `mistral`, `together`, `fireworks`, `perplexity`, `lm_studio`, `ollama`, or custom) |
+| `ACR_PROVIDER` | `groq` | LLM provider (`groq`, `openai`, `anthropic`, `gemini`, `grok`, `deepseek`, `openrouter`, `mistral`, `together`, `fireworks`, `perplexity`, `lm_studio`, `ollama`, `claude_code`, `codex`, `opencode`, `gemini_cli`, or custom) |
 | `ACR_MODEL` | `llama-3.3-70b-versatile` | Model name |
 | `ACR_API_KEY` | unset | API key (required by cloud providers) |
 | `ACR_API_URL` | auto | API endpoint (auto-resolved from provider) |

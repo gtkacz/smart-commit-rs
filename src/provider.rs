@@ -2,8 +2,10 @@ use anyhow::{bail, Context, Result};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde_json::Value;
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::process::{Command, ExitStatus, Stdio};
 use std::sync::OnceLock;
+use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::config::AppConfig;
@@ -33,6 +35,48 @@ struct ProviderDef {
     default_model: &'static str,
     format: RequestFormat,
     response_path: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Harness {
+    ClaudeCode,
+    Codex,
+    OpenCode,
+    GeminiCli,
+}
+
+impl Harness {
+    fn executable(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "claude",
+            Self::Codex => "codex",
+            Self::OpenCode => "opencode",
+            Self::GeminiCli => "gemini",
+        }
+    }
+
+    fn display_name(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "Claude Code",
+            Self::Codex => "Codex",
+            Self::OpenCode => "OpenCode",
+            Self::GeminiCli => "Gemini CLI",
+        }
+    }
+}
+
+fn get_harness(name: &str) -> Option<Harness> {
+    match name {
+        "claude_code" | "claude-code" => Some(Harness::ClaudeCode),
+        "codex" => Some(Harness::Codex),
+        "opencode" => Some(Harness::OpenCode),
+        "gemini_cli" | "gemini-cli" => Some(Harness::GeminiCli),
+        _ => None,
+    }
+}
+
+pub fn is_local_harness(provider: &str) -> bool {
+    get_harness(provider).is_some()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -157,6 +201,9 @@ pub fn default_model_for(provider: &str) -> &'static str {
 /// used only when it has a recognizable chat-completions shape, preventing
 /// guesses against arbitrary custom APIs.
 pub fn model_list_spec(cfg: &AppConfig) -> Option<ModelListSpec> {
+    if is_local_harness(&cfg.provider) {
+        return None;
+    }
     if !cfg.api_url.trim().is_empty() {
         let url = derive_models_url(&cfg.api_url)?;
         let headers = if cfg.api_headers.is_empty() {
@@ -225,6 +272,9 @@ fn derive_models_url(api_url: &str) -> Option<String> {
 
 /// Returns true if the provider requires an API key (i.e. its header template references $ACR_API_KEY).
 pub fn provider_requires_api_key(cfg: &AppConfig) -> bool {
+    if is_local_harness(&cfg.provider) {
+        return false;
+    }
     let headers = if let Some(def) = get_provider(&cfg.provider) {
         if cfg.api_headers.is_empty() {
             def.api_headers.to_string()
@@ -248,6 +298,7 @@ pub fn provider_requires_api_key(cfg: &AppConfig) -> bool {
     headers.contains("$ACR_API_KEY") || url.contains("$ACR_API_KEY")
 }
 
+#[derive(Debug)]
 pub enum LlmCallError {
     HttpError { code: u16, body: String },
     TransportError(String),
@@ -287,6 +338,17 @@ fn call_llm_inner(
     deadline: Instant,
     output_mode: OutputMode,
 ) -> Result<String, LlmCallError> {
+    if let Some(harness) = get_harness(&cfg.provider) {
+        return call_harness(
+            harness,
+            cfg,
+            system_prompt,
+            user_prompt,
+            deadline,
+            output_mode,
+        );
+    }
+
     let (url, headers_raw, format, response_path) =
         resolve_provider(cfg).map_err(LlmCallError::Other)?;
 
@@ -562,6 +624,288 @@ fn resolve_provider(cfg: &AppConfig) -> Result<(String, String, RequestFormat, S
             "choices.0.message.content".to_string(),
         ))
     }
+}
+
+struct HarnessOutput {
+    status: ExitStatus,
+    stdout: String,
+    stderr: String,
+}
+
+fn call_harness(
+    harness: Harness,
+    cfg: &AppConfig,
+    system_prompt: &str,
+    user_prompt: &str,
+    deadline: Instant,
+    output_mode: OutputMode,
+) -> Result<String, LlmCallError> {
+    let mut last_message = None;
+    let mut command =
+        harness_command(harness, cfg, &mut last_message).map_err(LlmCallError::Other)?;
+    let prompt = combined_harness_prompt(system_prompt, user_prompt);
+
+    let spinner = (output_mode == OutputMode::Interactive).then(new_spinner);
+    let output = run_harness_process(&mut command, &prompt, deadline, harness);
+    if let Some(spinner) = spinner {
+        spinner.finish_and_clear();
+    }
+    let output = output?;
+
+    if !output.status.success() {
+        let diagnostic = if output.stderr.trim().is_empty() {
+            output.stdout.trim()
+        } else {
+            output.stderr.trim()
+        };
+        let diagnostic = if diagnostic.is_empty() {
+            "no diagnostic output".to_string()
+        } else {
+            redact(diagnostic, &cfg.api_key)
+        };
+        return Err(LlmCallError::Other(anyhow::anyhow!(
+            "{} exited with {}: {}",
+            harness.display_name(),
+            output.status,
+            diagnostic
+        )));
+    }
+
+    let message = match harness {
+        Harness::ClaudeCode => extract_json_field(&output.stdout, "result", harness)?,
+        Harness::Codex => {
+            let mut file = last_message.expect("Codex always creates a last-message file");
+            file.as_file_mut()
+                .seek(SeekFrom::Start(0))
+                .map_err(|error| harness_io_error(harness, "read output", error))?;
+            read_bounded(file.as_file_mut(), MAX_RESPONSE_BYTES).map_err(|error| {
+                LlmCallError::Other(error.context("Failed to read Codex output"))
+            })?
+        }
+        Harness::OpenCode => extract_opencode_text(&output.stdout)?,
+        Harness::GeminiCli => extract_json_field(&output.stdout, "response", harness)?,
+    };
+
+    if message.trim().is_empty() {
+        return Err(LlmCallError::Other(anyhow::anyhow!(
+            "{} returned an empty commit message",
+            harness.display_name()
+        )));
+    }
+    Ok(message)
+}
+
+fn harness_command(
+    harness: Harness,
+    cfg: &AppConfig,
+    last_message: &mut Option<tempfile::NamedTempFile>,
+) -> Result<Command> {
+    let mut command = Command::new(harness.executable());
+    match harness {
+        Harness::ClaudeCode => {
+            command.args([
+                "--print",
+                "--output-format",
+                "json",
+                "--no-session-persistence",
+                "--permission-mode",
+                "plan",
+                "--tools",
+                "",
+            ]);
+        }
+        Harness::Codex => {
+            let output = tempfile::NamedTempFile::new()
+                .context("Failed to create temporary Codex output file")?;
+            command.args([
+                "exec",
+                "--sandbox",
+                "read-only",
+                "--ephemeral",
+                "--color",
+                "never",
+                "--output-last-message",
+            ]);
+            command.arg(output.path());
+            *last_message = Some(output);
+        }
+        Harness::OpenCode => {
+            command.args(["run", "--format", "json", "--agent", "plan"]);
+        }
+        Harness::GeminiCli => {
+            command.args([
+                "--prompt",
+                "",
+                "--output-format",
+                "json",
+                "--approval-mode",
+                "plan",
+            ]);
+        }
+    }
+    if !cfg.model.trim().is_empty() {
+        command.arg("--model").arg(cfg.model.trim());
+    }
+    if harness == Harness::Codex {
+        command.arg("-");
+    }
+    Ok(command)
+}
+
+fn combined_harness_prompt(system_prompt: &str, user_prompt: &str) -> String {
+    format!(
+        "<system_instructions>\n{system_prompt}\n</system_instructions>\n\n{user_prompt}\n\nDo not inspect the workspace or call tools. Return only the requested commit message."
+    )
+}
+
+fn new_spinner() -> ProgressBar {
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner:.cyan} {msg} {elapsed}")
+            .unwrap(),
+    );
+    spinner.set_message("Generating commit message...");
+    spinner.enable_steady_tick(Duration::from_millis(80));
+    spinner
+}
+
+fn run_harness_process(
+    command: &mut Command,
+    prompt: &str,
+    deadline: Instant,
+    harness: Harness,
+) -> Result<HarnessOutput, LlmCallError> {
+    let mut stdin = tempfile::tempfile()
+        .map_err(|error| harness_io_error(harness, "create stdin buffer", error))?;
+    stdin
+        .write_all(prompt.as_bytes())
+        .map_err(|error| harness_io_error(harness, "write stdin buffer", error))?;
+    stdin
+        .seek(SeekFrom::Start(0))
+        .map_err(|error| harness_io_error(harness, "rewind stdin buffer", error))?;
+    let mut stdout = tempfile::tempfile()
+        .map_err(|error| harness_io_error(harness, "create stdout buffer", error))?;
+    let mut stderr = tempfile::tempfile()
+        .map_err(|error| harness_io_error(harness, "create stderr buffer", error))?;
+    command
+        .stdin(Stdio::from(stdin))
+        .stdout(Stdio::from(stdout.try_clone().map_err(|error| {
+            harness_io_error(harness, "create stdout buffer", error)
+        })?))
+        .stderr(Stdio::from(stderr.try_clone().map_err(|error| {
+            harness_io_error(harness, "create stderr buffer", error)
+        })?));
+
+    let mut child = command.spawn().map_err(|error| {
+        LlmCallError::Other(anyhow::anyhow!(
+            "Failed to start {} executable '{}': {}. Install and authenticate the CLI first.",
+            harness.display_name(),
+            harness.executable(),
+            error
+        ))
+    })?;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(20));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(LlmCallError::TransportError(format!(
+                    "{} exceeded the total request deadline",
+                    harness.display_name()
+                )));
+            }
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(harness_io_error(harness, "wait for process", error));
+            }
+        }
+    };
+
+    stdout
+        .seek(SeekFrom::Start(0))
+        .map_err(|error| harness_io_error(harness, "read stdout", error))?;
+    stderr
+        .seek(SeekFrom::Start(0))
+        .map_err(|error| harness_io_error(harness, "read stderr", error))?;
+    let stdout = read_bounded(&mut stdout, MAX_RESPONSE_BYTES)
+        .map_err(|error| LlmCallError::Other(error.context("Harness output was invalid")))?;
+    let stderr = read_bounded(&mut stderr, MAX_ERROR_BODY_BYTES)
+        .unwrap_or_else(|_| "<diagnostic output exceeded safety limit>".into());
+
+    Ok(HarnessOutput {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+fn harness_io_error(harness: Harness, action: &str, error: std::io::Error) -> LlmCallError {
+    LlmCallError::Other(anyhow::anyhow!(
+        "Failed to {action} for {}: {error}",
+        harness.display_name()
+    ))
+}
+
+fn extract_json_field(output: &str, field: &str, harness: Harness) -> Result<String, LlmCallError> {
+    let value: Value = serde_json::from_str(output).map_err(|error| {
+        LlmCallError::Other(anyhow::anyhow!(
+            "Failed to parse {} output as JSON: {error}",
+            harness.display_name()
+        ))
+    })?;
+    value
+        .get(field)
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| {
+            LlmCallError::Other(anyhow::anyhow!(
+                "{} JSON output did not contain a string '{}' field",
+                harness.display_name(),
+                field
+            ))
+        })
+}
+
+fn extract_opencode_text(output: &str) -> Result<String, LlmCallError> {
+    let mut parts: Vec<(String, String)> = Vec::new();
+    for (line_number, line) in output.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let event: Value = serde_json::from_str(line).map_err(|error| {
+            LlmCallError::Other(anyhow::anyhow!(
+                "Failed to parse OpenCode JSON event on line {}: {}",
+                line_number + 1,
+                error
+            ))
+        })?;
+        if event.get("type").and_then(Value::as_str) != Some("text") {
+            continue;
+        }
+        let Some(part) = event.get("part") else {
+            continue;
+        };
+        let Some(text) = part.get("text").and_then(Value::as_str) else {
+            continue;
+        };
+        let id = part
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("line-{line_number}"));
+        if let Some((_, existing)) = parts.iter_mut().find(|(existing_id, _)| *existing_id == id) {
+            *existing = text.to_string();
+        } else {
+            parts.push((id, text.to_string()));
+        }
+    }
+    Ok(parts.into_iter().map(|(_, text)| text).collect())
 }
 
 fn build_request_body(
@@ -1149,5 +1493,117 @@ mod tests {
         let result = extract_message(&json, RequestFormat::LmStudio, "output");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("type 'message'"));
+    }
+
+    #[test]
+    fn local_harness_names_and_aliases_are_recognized() {
+        for name in [
+            "claude_code",
+            "claude-code",
+            "codex",
+            "opencode",
+            "gemini_cli",
+            "gemini-cli",
+        ] {
+            assert!(is_local_harness(name), "unrecognized harness {name}");
+            assert_eq!(default_model_for(name), "");
+        }
+        assert!(!is_local_harness("gemini"));
+    }
+
+    #[test]
+    fn local_harnesses_ignore_http_configuration() {
+        let cfg = AppConfig {
+            provider: "codex".into(),
+            api_url: "https://example.test/v1/chat/completions?key=$ACR_API_KEY".into(),
+            api_headers: "Authorization: Bearer $ACR_API_KEY".into(),
+            ..Default::default()
+        };
+        assert!(!provider_requires_api_key(&cfg));
+        assert!(model_list_spec(&cfg).is_none());
+    }
+
+    #[test]
+    fn harness_commands_are_non_interactive_and_read_only() {
+        let cfg = AppConfig {
+            model: "chosen-model".into(),
+            ..Default::default()
+        };
+        let cases = [
+            (Harness::ClaudeCode, "claude", "--permission-mode", "plan"),
+            (Harness::Codex, "codex", "--sandbox", "read-only"),
+            (Harness::OpenCode, "opencode", "--agent", "plan"),
+            (Harness::GeminiCli, "gemini", "--approval-mode", "plan"),
+        ];
+
+        for (harness, executable, mode_flag, mode) in cases {
+            let mut output = None;
+            let command = harness_command(harness, &cfg, &mut output).unwrap();
+            let args = command
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect::<Vec<_>>();
+            assert_eq!(command.get_program(), executable);
+            assert!(args.windows(2).any(|pair| pair == [mode_flag, mode]));
+            assert!(args
+                .windows(2)
+                .any(|pair| pair == ["--model", "chosen-model"]));
+            assert_eq!(output.is_some(), harness == Harness::Codex);
+        }
+    }
+
+    #[test]
+    fn blank_model_uses_harness_configuration() {
+        let cfg = AppConfig {
+            model: "  ".into(),
+            ..Default::default()
+        };
+        let mut output = None;
+        let command = harness_command(Harness::GeminiCli, &cfg, &mut output).unwrap();
+        assert!(!command.get_args().any(|arg| arg == "--model"));
+    }
+
+    #[test]
+    fn parses_claude_and_gemini_json_output() {
+        assert_eq!(
+            extract_json_field(
+                r#"{"result":"feat: from claude"}"#,
+                "result",
+                Harness::ClaudeCode
+            )
+            .unwrap(),
+            "feat: from claude"
+        );
+        assert_eq!(
+            extract_json_field(
+                r#"{"response":"fix: from gemini"}"#,
+                "response",
+                Harness::GeminiCli
+            )
+            .unwrap(),
+            "fix: from gemini"
+        );
+    }
+
+    #[test]
+    fn parses_and_deduplicates_opencode_text_events() {
+        let output = concat!(
+            "{\"type\":\"step_start\"}\n",
+            "{\"type\":\"text\",\"part\":{\"id\":\"one\",\"text\":\"feat:\"}}\n",
+            "{\"type\":\"text\",\"part\":{\"id\":\"one\",\"text\":\"feat: add\"}}\n",
+            "{\"type\":\"text\",\"part\":{\"id\":\"two\",\"text\":\" harnesses\"}}\n"
+        );
+        assert_eq!(
+            extract_opencode_text(output).unwrap(),
+            "feat: add harnesses"
+        );
+    }
+
+    #[test]
+    fn combined_prompt_separates_system_instructions_from_user_input() {
+        let prompt = combined_harness_prompt("system", "user");
+        assert!(prompt.contains("<system_instructions>\nsystem\n</system_instructions>"));
+        assert!(prompt.contains("\n\nuser\n\n"));
+        assert!(prompt.contains("Do not inspect the workspace or call tools"));
     }
 }

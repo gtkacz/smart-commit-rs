@@ -12,9 +12,10 @@ executable is `cgen`; the crates.io package is `auto-commit-rs`.
 
 ## Features
 
-- **13 built-in providers** — Groq (default), OpenAI, Anthropic, Gemini, Grok,
-  DeepSeek, OpenRouter, Mistral, Together, Fireworks, Perplexity, LM Studio,
-  Ollama — plus any OpenAI-compatible custom endpoint. Local models need no API key.
+- **17 built-in providers** — cloud APIs, local model servers, and the Claude
+  Code, Codex, OpenCode, and Gemini CLI harnesses — plus any OpenAI-compatible
+  custom endpoint. CLI harnesses use their existing login; local model servers
+  need no API key.
 - **Review before committing** — accept, regenerate, edit in your editor, or cancel.
 - **Flexible generation** — stage tracked changes with `--all`, print a clean
   message with `--stdout`, request multiple candidates, or add per-run guidance.
@@ -117,7 +118,7 @@ TOML → local `.env` in the repo root → process environment → CLI `--set`
 
 ## Providers
 
-Built-in providers: **Groq** (default), **OpenAI**, **Anthropic**, **Gemini**, **Grok**, **DeepSeek**, **OpenRouter**, **Mistral**, **Together**, **Fireworks**, **Perplexity**, **LM Studio**, **Ollama** — plus any OpenAI-compatible custom endpoint.
+Built-in providers: **Groq** (default), **OpenAI**, **Anthropic**, **Gemini**, **Grok**, **DeepSeek**, **OpenRouter**, **Mistral**, **Together**, **Fireworks**, **Perplexity**, **LM Studio**, **Ollama**, **Claude Code**, **Codex**, **OpenCode**, and **Gemini CLI** — plus any OpenAI-compatible custom endpoint.
 
 → [Provider list and default models](https://gtkacz.github.io/smart-commit-rs/providers/built-in-providers.html), [presets](https://gtkacz.github.io/smart-commit-rs/providers/presets.html), and [fallback order](https://gtkacz.github.io/smart-commit-rs/providers/fallback-order.html).
 

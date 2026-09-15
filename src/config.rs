@@ -1182,8 +1182,8 @@ fn quote_dotenv(value: &str) -> String {
 /// Get description for a field by its env suffix
 pub fn field_description(suffix: &str) -> &'static str {
     match suffix {
-        "PROVIDER" => "LLM provider (gemini, openai, anthropic, groq, grok, deepseek, openrouter, mistral, together, fireworks, perplexity, lm_studio, ollama, or custom)",
-        "MODEL" => "Model identifier for the selected provider",
+        "PROVIDER" => "LLM provider (gemini, openai, anthropic, groq, grok, deepseek, openrouter, mistral, together, fireworks, perplexity, lm_studio, ollama, claude_code, codex, opencode, gemini_cli, or custom)",
+        "MODEL" => "Model identifier for the selected provider (blank uses a CLI harness default)",
         "API_KEY" => "API key for authenticating with the LLM provider",
         "API_URL" => "Custom API endpoint URL (leave empty to use provider default)",
         "API_HEADERS" => "Additional HTTP headers for API requests (JSON format)",

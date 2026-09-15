@@ -4,7 +4,8 @@
 
 cgen defaults to [Groq](https://console.groq.com/keys), which has a free tier.
 Any other [built-in provider](../providers/built-in-providers.md) works the same
-way — and local providers (Ollama, LM Studio) need no key at all.
+way — and local providers (Ollama, LM Studio, Claude Code, Codex, OpenCode, and
+Gemini CLI) need no `ACR_API_KEY`.
 
 ## 2. Configure
 

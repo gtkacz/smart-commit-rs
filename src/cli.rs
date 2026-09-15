@@ -470,10 +470,12 @@ pub fn interactive_config(global: bool) -> Result<()> {
                             explicit_fields.insert("MODEL".to_string());
                         }
                         if default_model.is_empty() {
-                            println!(
-                                "  {} Model cleared (set it manually)",
-                                "note:".yellow().bold()
-                            );
+                            let note = if crate::provider::is_local_harness(&val) {
+                                "Model cleared (the harness default will be used)"
+                            } else {
+                                "Model cleared (set it manually)"
+                            };
+                            println!("  {} {note}", "note:".yellow().bold());
                         } else {
                             println!(
                                 "  {} Model set to {}",
@@ -573,6 +575,10 @@ fn edit_field(suffix: &str, cfg: &AppConfig) -> Option<String> {
                 "perplexity",
                 "lm_studio",
                 "ollama",
+                "claude_code",
+                "codex",
+                "opencode",
+                "gemini_cli",
                 "(custom)",
             ];
             match Select::new("Provider:", choices).prompt() {
