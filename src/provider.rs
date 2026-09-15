@@ -1606,4 +1606,18 @@ mod tests {
         assert!(prompt.contains("\n\nuser\n\n"));
         assert!(prompt.contains("Do not inspect the workspace or call tools"));
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn harness_process_honors_expired_deadline() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "sleep 1"]);
+        let error =
+            match run_harness_process(&mut command, "prompt", Instant::now(), Harness::Codex) {
+                Ok(_) => panic!("expired deadline should fail"),
+                Err(error) => error,
+            };
+        assert!(matches!(error, LlmCallError::TransportError(_)));
+        assert!(error.to_string().contains("deadline"));
+    }
 }

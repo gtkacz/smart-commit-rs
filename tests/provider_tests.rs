@@ -682,3 +682,154 @@ fn call_llm_with_multiple_custom_headers() {
     assert_eq!(msg, "headers ok");
     mock.assert();
 }
+
+#[cfg(unix)]
+fn install_fake_harnesses(directory: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let script = r#"#!/bin/sh
+input=$(cat)
+if [ -n "$HARNESS_PROMPT_LOG" ]; then
+    printf '%s' "$input" > "$HARNESS_PROMPT_LOG"
+fi
+if [ -n "$HARNESS_FAIL" ]; then
+    printf 'rejected top-secret' >&2
+    exit 9
+fi
+case "$HARNESS_MODE" in
+    bad-json) printf 'not json'; exit 0 ;;
+    missing-field) printf '{}'; exit 0 ;;
+    empty) printf '{"result":""}'; exit 0 ;;
+    stdout-fail) printf 'failed top-secret'; exit 9 ;;
+    silent-fail) exit 9 ;;
+esac
+name=${0##*/}
+case "$name" in
+    claude) printf '{"result":"feat: claude harness"}' ;;
+    codex)
+        while [ "$#" -gt 0 ]; do
+            if [ "$1" = "--output-last-message" ]; then
+                shift
+                printf 'feat: codex harness' > "$1"
+                break
+            fi
+            shift
+        done
+        ;;
+    opencode) printf '%s\n' '{"type":"text","part":{"id":"one","text":"feat: opencode harness"}}' ;;
+    gemini) printf '{"response":"feat: gemini harness"}' ;;
+esac
+"#;
+
+    for executable in ["claude", "codex", "opencode", "gemini"] {
+        let path = directory.join(executable);
+        fs::write(&path, script).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
+#[cfg(unix)]
+#[test]
+#[serial]
+fn local_harnesses_execute_end_to_end_and_redact_failures() {
+    let directory = tempfile::tempdir().unwrap();
+    install_fake_harnesses(directory.path());
+    let prompt_log = directory.path().join("prompt.log");
+    let path = std::env::join_paths(std::iter::once(directory.path().to_path_buf()).chain(
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+    ))
+    .unwrap();
+    let path = path.to_string_lossy().into_owned();
+    let prompt_log_value = prompt_log.to_string_lossy().into_owned();
+    let _env = EnvGuard::set(&[("PATH", &path), ("HARNESS_PROMPT_LOG", &prompt_log_value)]);
+
+    for (provider_name, expected) in [
+        ("claude_code", "feat: claude harness"),
+        ("codex", "feat: codex harness"),
+        ("opencode", "feat: opencode harness"),
+        ("gemini_cli", "feat: gemini harness"),
+    ] {
+        let cfg = AppConfig {
+            provider: provider_name.into(),
+            model: String::new(),
+            api_key: "top-secret".into(),
+            fallback_enabled: false,
+            ..Default::default()
+        };
+        let (message, fallback) = provider::call_llm_with_fallback_mode(
+            &cfg,
+            "system instructions",
+            "user prompt",
+            provider::OutputMode::Quiet,
+        )
+        .unwrap();
+        assert_eq!(message, expected);
+        assert_eq!(fallback, None);
+        let prompt = fs::read_to_string(&prompt_log).unwrap();
+        assert!(prompt.contains("system instructions"));
+        assert!(prompt.contains("user prompt"));
+    }
+
+    let cfg = AppConfig {
+        provider: "claude_code".into(),
+        model: String::new(),
+        api_key: "top-secret".into(),
+        fallback_enabled: false,
+        ..Default::default()
+    };
+    let call = || {
+        provider::call_llm_with_fallback_mode(
+            &cfg,
+            "system instructions",
+            "user prompt",
+            provider::OutputMode::Quiet,
+        )
+        .unwrap_err()
+        .to_string()
+    };
+
+    {
+        let _failure = EnvGuard::set(&[("HARNESS_FAIL", "1")]);
+        let error = call();
+        assert!(error.contains("exit status: 9"));
+        assert!(error.contains("[REDACTED]"));
+        assert!(!error.contains("top-secret"));
+    }
+    {
+        let _mode = EnvGuard::set(&[("HARNESS_MODE", "stdout-fail")]);
+        let error = call();
+        assert!(error.contains("[REDACTED]"));
+        assert!(!error.contains("top-secret"));
+    }
+    {
+        let _mode = EnvGuard::set(&[("HARNESS_MODE", "silent-fail")]);
+        assert!(call().contains("no diagnostic output"));
+    }
+    for (mode, expected) in [
+        ("bad-json", "parse Claude Code output"),
+        ("missing-field", "did not contain a string 'result' field"),
+        ("empty", "empty commit message"),
+    ] {
+        let _mode = EnvGuard::set(&[("HARNESS_MODE", mode)]);
+        assert!(call().contains(expected));
+    }
+    {
+        let _mode = EnvGuard::set(&[("HARNESS_MODE", "bad-json")]);
+        let mut opencode_cfg = cfg.clone();
+        opencode_cfg.provider = "opencode".into();
+        let error = provider::call_llm_with_fallback_mode(
+            &opencode_cfg,
+            "system instructions",
+            "user prompt",
+            provider::OutputMode::Quiet,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("parse OpenCode JSON event"));
+    }
+
+    let missing_directory = tempfile::tempdir().unwrap();
+    let missing_path = missing_directory.path().to_string_lossy();
+    let _missing_path = EnvGuard::set(&[("PATH", &missing_path)]);
+    assert!(call().contains("Failed to start Claude Code executable"));
+}

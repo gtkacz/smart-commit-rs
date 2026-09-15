@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   OpenCode (`opencode`), and Gemini CLI (`gemini_cli`), using each harness's
   existing authentication and optional default model
 
+### Fixed
+
+- Update `h2` and `rustls` to releases that address their current RustSec
+  advisories
+
 ## [1.5.0] - 2026-07-28
 
 ### Added
